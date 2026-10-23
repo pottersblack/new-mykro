@@ -1,0 +1,2124 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mykro — Neural Constellation v2</title>
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --font-display: 'Satoshi', 'Inter', sans-serif;
+      --font-body: 'General Sans', 'Inter', sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --text-xs: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+      --text-sm: clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+      --text-base: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+      --text-lg: clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+      --text-xl: clamp(1.5rem, 1.2rem + 1.25vw, 2.25rem);
+      --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem;
+      --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem; --space-10: 2.5rem; --space-12: 3rem;
+      --radius-sm: 0.375rem; --radius-md: 0.5rem; --radius-lg: 0.75rem; --radius-xl: 1rem; --radius-full: 9999px;
+      --transition-ui: 220ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    :root, [data-theme="dark"] {
+      --color-bg: #090b10;
+      --color-surface: #0d1119;
+      --color-surface-2: #101522;
+      --color-surface-offset: #151b2a;
+      --color-surface-dynamic: #1e2740;
+      --color-divider: #20283b;
+      --color-border: #2a3550;
+      --color-text: #dce4f5;
+      --color-text-muted: #90a0c0;
+      --color-text-faint: #4d5a78;
+      --color-primary: #56c7ff;
+      --color-primary-hover: #8cdbff;
+      --color-primary-dim: rgba(86,199,255,0.10);
+      --color-primary-glow: rgba(86,199,255,0.24);
+      --color-accent: #baa8ff;
+      --color-accent-glow: rgba(186,168,255,0.18);
+      --color-success: #67d58c;
+      --color-warning: #ffb347;
+      --color-error: #ff6a6a;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.35);
+      --shadow-md: 0 8px 28px rgba(0,0,0,.45);
+      --shadow-lg: 0 18px 60px rgba(0,0,0,.62);
+    }
+    [data-theme="light"] {
+      --color-bg: #eef3fb;
+      --color-surface: #f7f9fe;
+      --color-surface-2: #ffffff;
+      --color-surface-offset: #e8eef9;
+      --color-surface-dynamic: #dae4f5;
+      --color-divider: #d1d9ea;
+      --color-border: #c0cde3;
+      --color-text: #152033;
+      --color-text-muted: #5d6f8f;
+      --color-text-faint: #93a1bb;
+      --color-primary: #127cc3;
+      --color-primary-hover: #0f68a3;
+      --color-primary-dim: rgba(18,124,195,0.08);
+      --color-primary-glow: rgba(18,124,195,0.16);
+      --color-accent: #7147d8;
+      --color-accent-glow: rgba(113,71,216,0.12);
+      --color-success: #238a52;
+      --color-warning: #cd7c00;
+      --color-error: #c63d3d;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
+      --shadow-md: 0 8px 28px rgba(0,0,0,.12);
+      --shadow-lg: 0 18px 60px rgba(0,0,0,.16);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-font-smoothing: antialiased; }
+    body {
+      min-height: 100dvh; overflow: hidden; background: var(--color-bg); color: var(--color-text);
+      font-family: var(--font-body); font-size: var(--text-base);
+    }
+    button, input, textarea, select { font: inherit; color: inherit; }
+    button { background: none; border: none; cursor: pointer; }
+    :focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 6px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 999px; }
+
+    #app { height: 100dvh; display: grid; grid-template-columns: 56px 1fr 360px; grid-template-rows: 50px 1fr; }
+    #topbar {
+      grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-4);
+      padding: 0 var(--space-4); background: var(--color-surface); border-bottom: 1px solid var(--color-border); z-index: 30;
+    }
+    .logo-mark { display:flex; align-items:center; gap:8px; color:var(--color-text); text-decoration:none; }
+    .logo-mark svg { width:28px; height:28px; }
+    .logo-text { font: 700 var(--text-sm) var(--font-display); letter-spacing:.1em; text-transform:uppercase; color:var(--color-primary); }
+    .tab-bar { display:flex; align-items:center; gap:4px; flex:1; overflow-x:auto; scrollbar-width:none; }
+    .tab-bar::-webkit-scrollbar { display:none; }
+    .tab-btn {
+      display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; white-space:nowrap;
+      color:var(--color-text-muted); font-size:var(--text-xs); font-weight:600; position:relative;
+      transition: background var(--transition-ui), color var(--transition-ui);
+    }
+    .tab-btn:hover { background: var(--color-surface-offset); color: var(--color-text); }
+    .tab-btn.active { background: var(--color-primary-dim); color: var(--color-primary); }
+    .tab-btn.active::after {
+      content:''; position:absolute; left:50%; transform:translateX(-50%); bottom:-1px; width:24px; height:2px;
+      background:var(--color-primary); border-radius:999px;
+    }
+    .tab-btn svg { width:14px; height:14px; }
+    #status-pill {
+      margin-left:auto; display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px;
+      border:1px solid var(--color-border); background:var(--color-surface-offset); font-size:var(--text-xs); font-weight:600;
+    }
+    .status-dot { width:7px; height:7px; border-radius:50%; background:var(--color-text-faint); }
+    .status-dot.online { background:var(--color-success); box-shadow:0 0 10px rgba(103,213,140,.55); }
+    .status-dot.warning { background:var(--color-warning); box-shadow:0 0 10px rgba(255,179,71,.55); }
+    .status-dot.error { background:var(--color-error); box-shadow:0 0 10px rgba(255,106,106,.55); }
+    .theme-btn { width:32px; height:32px; border-radius:10px; display:grid; place-items:center; color:var(--color-text-muted); }
+    .theme-btn:hover { color:var(--color-text); background:var(--color-surface-offset); }
+    .theme-btn svg { width:16px; height:16px; }
+
+    #icon-rail {
+      grid-column:1; grid-row:2; background:var(--color-surface); border-right:1px solid var(--color-border);
+      display:flex; flex-direction:column; align-items:center; gap:8px; padding:14px 0;
+    }
+    .rail-btn {
+      width:38px; height:38px; border-radius:10px; display:grid; place-items:center; color:var(--color-text-faint);
+      transition: background var(--transition-ui), color var(--transition-ui);
+    }
+    .rail-btn:hover, .rail-btn.active { background:var(--color-primary-dim); color:var(--color-primary); }
+    .rail-btn svg { width:18px; height:18px; }
+    .rail-sep { width:28px; height:1px; background:var(--color-divider); margin:4px 0; }
+
+    #constellation-zone { grid-column:2; grid-row:2; position:relative; overflow:hidden; }
+    #constellation-canvas { position:absolute; inset:0; width:100%; height:100%; }
+    #zone-toolbar {
+      position:absolute; top:16px; left:16px; z-index:5; display:flex; gap:8px; align-items:center;
+    }
+    .zone-badge {
+      display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px;
+      border:1px solid rgba(86,199,255,.3); background:rgba(13,17,25,.72); backdrop-filter:blur(8px);
+      box-shadow:0 0 20px var(--color-primary-glow); color:var(--color-primary); text-transform:uppercase;
+      letter-spacing:.08em; font-size:var(--text-xs); font-weight:700;
+    }
+    .pulse-ring { width:8px; height:8px; background:var(--color-primary); border-radius:50%; position:relative; }
+    .pulse-ring::after {
+      content:''; position:absolute; inset:-4px; border:1px solid var(--color-primary); border-radius:50%; animation:pulse 2s infinite ease-out;
+    }
+    @keyframes pulse { from { opacity:.8; transform:scale(1); } to { opacity:0; transform:scale(2.35);} }
+
+    #zone-statusbar {
+      position:absolute; left:16px; right:16px; bottom:16px; display:flex; gap:10px; z-index:5; flex-wrap:wrap;
+    }
+    .metric-chip {
+      display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:999px; font-size:var(--text-xs);
+      border:1px solid var(--color-border); background:rgba(13,17,25,.7); backdrop-filter:blur(7px); color:var(--color-text-muted);
+      font-variant-numeric:tabular-nums;
+    }
+    .metric-chip .val { color:var(--color-primary); font-weight:700; }
+    .metric-chip svg { width:12px; height:12px; }
+
+    #right-panel {
+      grid-column:3; grid-row:2; background:var(--color-surface); border-left:1px solid var(--color-border);
+      display:grid; grid-template-rows:auto 1fr auto; overflow:hidden;
+    }
+    #health-banner {
+      margin:12px 12px 0; padding:10px 12px; border-radius:10px; display:flex; align-items:center; gap:8px;
+      font-size:var(--text-xs); border:1px solid var(--color-border); background:var(--color-surface-offset); color:var(--color-text-muted);
+    }
+    #health-banner.ok { color:var(--color-success); border-color:var(--color-success); background:rgba(103,213,140,.10); }
+    #health-banner.warning { color:var(--color-warning); border-color:var(--color-warning); background:rgba(255,179,71,.10); }
+    #health-banner.error { color:var(--color-error); border-color:var(--color-error); background:rgba(255,106,106,.10); }
+    #health-banner svg { width:14px; height:14px; }
+
+    .panel-scroll { overflow:auto; min-height:0; padding:12px; }
+
+    .panel-stack { display:flex; flex-direction:column; gap:10px; }
+    .panel-card {
+      border:1px solid var(--color-border); background:var(--color-surface-2); border-radius:14px; overflow:hidden;
+      box-shadow:var(--shadow-sm);
+    }
+    .panel-card-header {
+      display:flex; align-items:center; justify-content:space-between; padding:11px 12px; gap:8px; cursor:pointer;
+      background:linear-gradient(180deg, rgba(255,255,255,.01), rgba(255,255,255,0));
+    }
+    .panel-card-header:hover { background:var(--color-surface-offset); }
+    .panel-card-title { display:flex; align-items:center; gap:8px; font-size:var(--text-xs); font-weight:700; color:var(--color-text); }
+    .panel-card-title svg { width:14px; height:14px; color:var(--color-primary); }
+    .chev { width:12px; height:12px; color:var(--color-text-faint); transition:transform var(--transition-ui); }
+    .panel-card.open .chev { transform:rotate(180deg); }
+    .panel-card-body { display:none; padding:0 12px 12px; }
+    .panel-card.open .panel-card-body { display:block; animation:panelIn .22s ease-out both; }
+    @keyframes panelIn { from { opacity:0; transform:translateY(-4px);} to { opacity:1; transform:none;} }
+
+    .subpanel {
+      border:1px solid var(--color-divider); background:var(--color-surface); border-radius:12px; margin-top:10px; overflow:hidden;
+    }
+    .subpanel-head {
+      padding:10px 12px; display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer;
+      border-bottom:1px solid transparent;
+    }
+    .subpanel-head:hover { background:var(--color-surface-offset); }
+    .subpanel-title { display:flex; align-items:center; gap:8px; font-size:var(--text-xs); font-weight:700; color:var(--color-text); }
+    .subpanel-title .mini-dot { width:7px; height:7px; border-radius:50%; background:var(--color-primary); box-shadow:0 0 10px var(--color-primary-glow); }
+    .subpanel-body { display:none; padding:10px 12px 12px; border-top:1px solid var(--color-divider); }
+    .subpanel.open .subpanel-body { display:block; animation:panelIn .2s ease-out both; }
+    .subpanel.open .chev { transform:rotate(180deg); }
+
+    .ctrl-row, .toggle-wrap { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .ctrl-label, .toggle-label { font-size:var(--text-xs); color:var(--color-text-muted); }
+    .ctrl-value { font-size:var(--text-xs); font-weight:700; color:var(--color-text); font-variant-numeric:tabular-nums; }
+    .btn-row { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn {
+      display:inline-flex; align-items:center; gap:8px; padding:8px 11px; border-radius:10px; font-size:var(--text-xs); font-weight:700;
+      border:1px solid transparent; transition:background var(--transition-ui), color var(--transition-ui), border-color var(--transition-ui), box-shadow var(--transition-ui);
+    }
+    .btn svg { width:12px; height:12px; }
+    .btn-primary { background:var(--color-primary); color:#091018; }
+    .btn-primary:hover { background:var(--color-primary-hover); box-shadow:0 0 16px var(--color-primary-glow); }
+    .btn-ghost { border-color:var(--color-border); color:var(--color-text-muted); }
+    .btn-ghost:hover { background:var(--color-surface-offset); color:var(--color-text); border-color:var(--color-primary); }
+    .btn-danger { border-color:var(--color-error); color:var(--color-error); }
+    .btn-danger:hover { background:rgba(255,106,106,.08); }
+    .toggle { position:relative; width:30px; height:18px; }
+    .toggle input { opacity:0; width:0; height:0; }
+    .toggle-track { position:absolute; inset:0; border-radius:999px; background:var(--color-surface-dynamic); border:1px solid var(--color-border); }
+    .toggle-thumb { position:absolute; top:2px; left:2px; width:10px; height:10px; border-radius:50%; background:#fff; transition:transform var(--transition-ui); }
+    .toggle input:checked ~ .toggle-track { background:var(--color-primary); border-color:var(--color-primary); }
+    .toggle input:checked ~ .toggle-thumb { transform:translateX(12px); }
+
+    .model-selector, .field, .search {
+      width:100%; border:1px solid var(--color-border); background:var(--color-surface-offset); border-radius:10px;
+      padding:9px 10px; font-size:var(--text-xs); color:var(--color-text); margin-bottom:10px;
+    }
+
+    .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .service-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+    .mini-stat {
+      padding:10px; border:1px solid var(--color-divider); border-radius:10px; background:var(--color-surface);
+    }
+    .mini-stat .k { font-size:10px; color:var(--color-text-faint); text-transform:uppercase; letter-spacing:.08em; }
+    .mini-stat .v { margin-top:4px; font-size:var(--text-xs); font-weight:700; color:var(--color-text); font-variant-numeric:tabular-nums; }
+    .mini-stat .sub { margin-top:4px; font-size:10px; color:var(--color-text-faint); line-height:1.4; }
+    .service-badge { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+    .service-badge.online { color:var(--color-success); background:rgba(103,213,140,.12); }
+    .service-badge.starting { color:var(--color-warning); background:rgba(255,179,71,.12); }
+    .service-badge.offline { color:var(--color-error); background:rgba(255,106,106,.12); }
+    .panel-note { margin-top:10px; font-size:11px; line-height:1.5; color:var(--color-text-muted); }
+    .diagnostic-box {
+      margin-top:10px; padding:10px; border:1px solid var(--color-divider); border-radius:10px; background:var(--color-surface); font-size:11px; color:var(--color-text-muted); line-height:1.5;
+      max-height:180px; overflow:auto; white-space:pre-wrap;
+    }
+
+    .memory-chip-list, .memory-log { display:flex; flex-wrap:wrap; gap:8px; }
+    .memory-chip {
+      display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:999px; font-size:10px; font-weight:700;
+      color:var(--color-accent); background:var(--color-accent-glow); border:1px solid rgba(186,168,255,.25);
+    }
+    .memory-chip svg { width:10px; height:10px; }
+
+    .memory-event-log, .packet-log {
+      margin-top:10px; max-height:160px; overflow:auto; display:flex; flex-direction:column; gap:8px;
+    }
+    .event-item, .packet-item {
+      padding:8px 10px; border-radius:10px; background:var(--color-surface); border:1px solid var(--color-divider);
+      font-size:11px; color:var(--color-text-muted);
+    }
+    .state-render-wrap {
+      border:1px solid var(--color-divider);
+      border-radius:12px;
+      overflow:hidden;
+      background:var(--color-surface);
+    }
+    .state-render-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:8px 10px;
+      border-bottom:1px solid var(--color-divider);
+      font-size:10px;
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      color:var(--color-text-faint);
+    }
+    .state-render-stage {
+      position:relative;
+      height:170px;
+      background:radial-gradient(circle at 50% 55%, rgba(86,199,255,.08), rgba(9,11,16,.95));
+    }
+    #state-render-canvas {
+      width:100%;
+      height:100%;
+      display:block;
+    }
+    .state-render-meta {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:8px;
+      padding:10px;
+    }
+    .state-meta-item {
+      border:1px solid var(--color-divider);
+      background:var(--color-surface-2);
+      border-radius:10px;
+      padding:8px;
+      font-size:10px;
+      color:var(--color-text-muted);
+    }
+    .state-meta-item strong {
+      display:block;
+      color:var(--color-text);
+      margin-top:2px;
+      font-size:11px;
+      font-variant-numeric:tabular-nums;
+    }
+    .state-render-status {
+      padding:0 10px 10px;
+      font-size:10px;
+      color:var(--color-text-faint);
+      line-height:1.4;
+    }
+    .event-item strong, .packet-item strong { color:var(--color-text); }
+    .packet-type { color:var(--color-primary); font-weight:700; }
+    .packet-time { color:var(--color-text-faint); margin-left:6px; }
+
+    .wiring-table { width:100%; border-collapse:collapse; font-size:var(--text-xs); }
+    .wiring-table th { text-align:left; padding:6px 8px; color:var(--color-text-faint); border-bottom:1px solid var(--color-divider); }
+    .wiring-table td { padding:8px; color:var(--color-text-muted); border-bottom:1px solid var(--color-divider); }
+    .wiring-table tr:last-child td { border-bottom:none; }
+    .badge { display:inline-flex; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; }
+    .badge-ok { color:var(--color-success); background:rgba(103,213,140,.12); }
+    .badge-warn { color:var(--color-warning); background:rgba(255,179,71,.12); }
+    .badge-err { color:var(--color-error); background:rgba(255,106,106,.12); }
+    .badge-idle { color:var(--color-text-faint); background:var(--color-surface-offset); }
+
+    #chat-panel { border-top:1px solid var(--color-border); background:var(--color-surface); display:grid; grid-template-rows:auto 1fr auto; min-height:270px; }
+    /* Collapsed chat: hide messages and input, keep header visible */
+    #chat-panel.collapsed { min-height:44px; }
+    #chat-panel.collapsed #chat-messages,
+    #chat-panel.collapsed #chat-input-bar { display:none; }
+    .panel-header { padding:10px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--color-divider); }
+    .panel-title { font-size:var(--text-xs); font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--color-text-muted); }
+    .panel-action-btn { width:24px; height:24px; border-radius:8px; display:grid; place-items:center; color:var(--color-text-faint); }
+    .panel-action-btn:hover { color:var(--color-primary); background:var(--color-primary-dim); }
+    .panel-action-btn svg { width:13px; height:13px; }
+    #chat-messages { overflow:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+    .msg { display:flex; flex-direction:column; gap:4px; max-width:92%; }
+    .msg.user { align-self:flex-end; align-items:flex-end; }
+    .msg.assistant { align-self:flex-start; align-items:flex-start; }
+    .msg.system { align-self:center; max-width:100%; }
+    .msg-bubble { padding:9px 11px; border-radius:12px; font-size:var(--text-xs); line-height:1.45; }
+    .msg.user .msg-bubble { background:var(--color-primary-dim); color:var(--color-text); border:1px solid rgba(86,199,255,.25); border-bottom-right-radius:5px; }
+    .msg.assistant .msg-bubble { background:var(--color-surface-offset); color:var(--color-text); border:1px solid var(--color-border); border-bottom-left-radius:5px; }
+    .msg.system .msg-bubble { background:transparent; border:1px dashed var(--color-divider); color:var(--color-text-muted); text-align:center; }
+    .msg-meta { font-size:10px; color:var(--color-text-faint); }
+    #chat-input-bar { padding:10px 12px; border-top:1px solid var(--color-divider); display:flex; gap:8px; }
+    #chat-input-bar.drag-over { background:var(--color-primary-dim); }
+    #chat-input {
+      flex:1; min-height:38px; max-height:110px; resize:none; padding:9px 10px; border-radius:12px;
+      border:1px solid var(--color-border); background:var(--color-surface-offset); font-size:var(--text-xs); line-height:1.45;
+    }
+    #chat-input:focus { outline:none; border-color:var(--color-primary); box-shadow:0 0 0 3px var(--color-primary-dim); }
+    .send-btn { width:38px; height:38px; border-radius:10px; background:var(--color-primary); color:#081018; display:grid; place-items:center; }
+    .send-btn:hover { background:var(--color-primary-hover); box-shadow:0 0 14px var(--color-primary-glow); }
+    .send-btn svg { width:14px; height:14px; }
+    .attach-btn {
+      width:38px; height:38px; border-radius:10px; border:1px solid var(--color-border);
+      color:var(--color-text-muted); display:grid; place-items:center; background:var(--color-surface-offset);
+    }
+    .attach-btn:hover { color:var(--color-text); border-color:var(--color-primary); }
+    #chat-attach-list { padding:0 12px 10px; display:flex; flex-wrap:wrap; gap:6px; }
+    .attach-chip {
+      display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
+      background:var(--color-primary-dim); border:1px solid var(--color-border); font-size:10px; color:var(--color-text-muted);
+    }
+    .attach-chip button { border:none; background:none; color:inherit; cursor:pointer; padding:0; font-weight:700; }
+
+    #focus-overlay {
+      position:absolute; inset:0; background:linear-gradient(90deg, rgba(9,11,16,.18), rgba(9,11,16,.75));
+      opacity:0; pointer-events:none; transition:opacity var(--transition-ui); z-index:6;
+    }
+    #focus-overlay.active { opacity:1; pointer-events:auto; }
+    #focus-panel {
+      position:absolute; top:16px; right:16px; bottom:16px; width:min(46vw, 620px);
+      border:1px solid var(--color-border); background:rgba(13,17,25,.88); backdrop-filter:blur(14px);
+      border-radius:18px; box-shadow:var(--shadow-lg); transform:translateX(24px); opacity:0;
+      transition:transform var(--transition-ui), opacity var(--transition-ui); display:grid; grid-template-rows:auto 1fr auto;
+    }
+    #focus-overlay.active #focus-panel { transform:none; opacity:1; }
+    .focus-head {
+      display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 16px; border-bottom:1px solid var(--color-divider);
+    }
+    .focus-title-wrap { display:flex; align-items:center; gap:10px; }
+    .focus-orb {
+      width:12px; height:12px; border-radius:50%; background:var(--color-primary); box-shadow:0 0 16px var(--color-primary-glow);
+    }
+    .focus-title { font-size:var(--text-sm); font-weight:700; color:var(--color-text); }
+    .focus-sub { font-size:10px; color:var(--color-text-faint); text-transform:uppercase; letter-spacing:.08em; }
+    .focus-close {
+      display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; border:1px solid var(--color-border);
+      color:var(--color-text-muted); font-size:var(--text-xs); font-weight:700;
+    }
+    .focus-close:hover { background:var(--color-surface-offset); color:var(--color-text); }
+    .focus-body { overflow:auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
+    .focus-section { border:1px solid var(--color-divider); border-radius:14px; background:var(--color-surface); overflow:hidden; }
+    .focus-section h3 {
+      padding:10px 12px; font-size:var(--text-xs); font-weight:700; color:var(--color-text); border-bottom:1px solid var(--color-divider);
+      background:var(--color-surface-offset);
+    }
+    .focus-section .focus-content { padding:12px; display:flex; flex-direction:column; gap:10px; }
+    .focus-desc { font-size:var(--text-xs); color:var(--color-text-muted); line-height:1.55; }
+    .focus-list { display:flex; flex-direction:column; gap:8px; }
+    .focus-list-item {
+      padding:10px 12px; border:1px solid var(--color-divider); border-radius:10px; background:var(--color-surface-2); font-size:var(--text-xs);
+      color:var(--color-text-muted);
+    }
+    .focus-list-item strong { color:var(--color-text); }
+
+    .typing-dots { display:flex; gap:4px; }
+    .typing-dots span { width:5px; height:5px; border-radius:50%; background:var(--color-text-faint); animation:bounce 1.2s infinite ease-in-out; }
+    .typing-dots span:nth-child(2) { animation-delay:.2s; } .typing-dots span:nth-child(3) { animation-delay:.4s; }
+    @keyframes bounce { 0%,60%,100%{ transform:none; } 30%{ transform:translateY(-4px);} }
+
+    @media (max-width: 1100px) {
+      #app { grid-template-columns: 0 1fr 340px; }
+      #icon-rail { display:none; }
+    }
+    @media (max-width: 860px) {
+      #app { grid-template-columns: 1fr; grid-template-rows: 50px 1fr; }
+      #right-panel { display:none; }
+      #constellation-zone { grid-column:1; grid-row:2; }
+      #focus-panel { width:auto; left:12px; right:12px; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <a class="logo-mark" href="#">
+      <svg viewBox="0 0 28 28" fill="none" aria-label="Mykro">
+        <circle cx="14" cy="14" r="13" stroke="currentColor" stroke-width="1" opacity="0.25"/>
+        <circle cx="14" cy="7" r="2.5" fill="#56c7ff"/>
+        <circle cx="21" cy="18" r="2.5" fill="#baa8ff"/>
+        <circle cx="7" cy="18" r="2.5" fill="#56c7ff" opacity="0.72"/>
+        <line x1="14" y1="7" x2="21" y2="18" stroke="#56c7ff" stroke-width="0.75" opacity="0.5"/>
+        <line x1="14" y1="7" x2="7" y2="18" stroke="#56c7ff" stroke-width="0.75" opacity="0.5"/>
+        <line x1="21" y1="18" x2="7" y2="18" stroke="#baa8ff" stroke-width="0.75" opacity="0.5"/>
+      </svg>
+      <span class="logo-text">Mykro</span>
+    </a>
+
+    <nav class="tab-bar" role="tablist" aria-label="Main navigation">
+      <button class="tab-btn active" data-tab="server"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="11" width="20" height="5" rx="1"/></svg>Server</button>
+      <button class="tab-btn" data-tab="website"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>Website</button>
+      <button class="tab-btn" data-tab="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3l3 3"/><path d="M5 21l6.5-6.5"/></svg>Tools</button>
+      <button class="tab-btn" data-tab="memory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>Memory</button>
+      <button class="tab-btn" data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/></svg>Settings</button>
+      <button class="tab-btn" data-tab="system"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/></svg>System</button>
+      <button class="tab-btn" data-tab="doctor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Doctor</button>
+      <button class="tab-btn" data-tab="automation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Automation</button>
+    </nav>
+
+    <div id="status-pill"><span class="status-dot" id="global-status-dot"></span><span id="global-status-text">Connecting…</span></div>
+    <button class="theme-btn" data-theme-toggle aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3"/></svg></button>
+  </header>
+
+  <nav id="icon-rail" aria-label="Quick access">
+    <button class="rail-btn active" data-tab="server"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="3"/><circle cx="3" cy="5" r="2"/><circle cx="21" cy="19" r="2"/></svg></button>
+    <div class="rail-sep"></div>
+    <button class="rail-btn" data-tab="website"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="12" cy="12" r="10"/></svg></button>
+    <button class="rail-btn" data-tab="memory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><ellipse cx="12" cy="5" rx="9" ry="3"/></svg></button>
+    <button class="rail-btn" data-tab="doctor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M22 12h-4l-3 9"/></svg></button>
+  </nav>
+
+  <section id="constellation-zone">
+    <canvas id="constellation-canvas"></canvas>
+    <div id="zone-toolbar"><div class="zone-badge"><span class="pulse-ring"></span>Neural Constellation</div></div>
+    <div id="zone-statusbar">
+      <div class="metric-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Latency <span class="val" id="metric-latency">—</span>ms</div>
+      <div class="metric-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>Uptime <span class="val" id="metric-uptime">—</span></div>
+      <div class="metric-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Model <span class="val" id="metric-model">—</span></div>
+      <div class="metric-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>Packets <span class="val" id="metric-packets">0</span></div>
+    </div>
+
+    <div id="focus-overlay">
+      <div id="focus-panel" role="dialog" aria-modal="true" aria-labelledby="focus-title">
+        <div class="focus-head">
+          <div class="focus-title-wrap">
+            <span class="focus-orb"></span>
+            <div>
+              <div class="focus-title" id="focus-title">Node Focus</div>
+              <div class="focus-sub" id="focus-sub">Detailed subsystem view</div>
+            </div>
+          </div>
+          <button class="focus-close" id="focus-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="15 18 9 12 15 6"/></svg>Back to constellation</button>
+        </div>
+        <div class="focus-body" id="focus-body"></div>
+        <div style="padding:12px 16px; border-top:1px solid var(--color-divider); display:flex; justify-content:space-between; gap:8px;">
+          <button class="btn btn-ghost" id="focus-tab-jump">Jump to tab</button>
+          <button class="btn btn-primary" id="focus-action-btn">Inspect node</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside id="right-panel">
+    <div id="health-banner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/></svg><span id="health-text">Checking system health…</span></div>
+
+    <div class="panel-scroll">
+      <div class="panel-stack">
+
+        <section class="panel-card open" data-panel="server">
+          <div class="panel-card-header"><div class="panel-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="5" rx="1"/><rect x="2" y="11" width="20" height="5" rx="1"/></svg>Model Server</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="panel-card-body">
+            <select class="model-selector" id="model-select"><option>Loading models…</option></select>
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="startModel()">Start</button>
+              <button class="btn btn-ghost" onclick="stopModel()">Stop</button>
+              <button class="btn btn-ghost" onclick="reloadModel()">Reload</button>
+            </div>
+            <div class="info-grid" style="margin-top:10px;">
+              <div class="mini-stat"><div class="k">Context</div><div class="v" id="mini-context">—</div></div>
+              <div class="mini-stat"><div class="k">Queue</div><div class="v" id="mini-queue">—</div></div>
+            </div>
+            <button class="btn btn-danger" style="width:100%; justify-content:center; margin-top:10px;" onclick="emergencyStop()">Emergency Stop</button>
+            <div class="diagnostic-box" id="stop-observability-box" style="margin-top:10px;">No stop actions recorded yet.</div>
+          </div>
+        </section>
+
+        <section class="panel-card" data-panel="memory">
+          <div class="panel-card-header"><div class="panel-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>Memory Store</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="panel-card-body">
+            <input class="search" id="memory-filter" placeholder="Filter memories…" />
+            <div class="memory-chip-list" id="memory-chips"><span class="memory-chip">No memories loaded</span></div>
+            <div class="memory-event-log" id="memory-event-log"></div>
+            <div class="btn-row" style="margin-top:10px;">
+              <button class="btn btn-ghost" onclick="loadMemories()">Refresh</button>
+              <button class="btn btn-ghost" onclick="clearMemories()">Clear</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-card" data-panel="doctor">
+          <div class="panel-card-header"><div class="panel-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Doctor / Wiring</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="panel-card-body">
+            <div class="btn-row" style="margin-bottom:10px;">
+              <button class="btn btn-primary" onclick="refreshDoctorPanel()">Refresh diagnostics</button>
+              <button class="btn btn-ghost" onclick="refreshServiceStatus()">Refresh services</button>
+            </div>
+            <table class="wiring-table"><thead><tr><th>Route</th><th>Method</th><th>Status</th></tr></thead><tbody id="wiring-tbody"><tr><td colspan="3">Loading…</td></tr></tbody></table>
+            <div class="diagnostic-box" id="doctor-summary">Doctor summary will appear here.</div>
+          </div>
+        </section>
+
+        <section class="panel-card" data-panel="website">
+          <div class="panel-card-header"><div class="panel-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>Website</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="panel-card-body">
+            <div class="subpanel" data-sub="household-site">
+              <div class="subpanel-head"><div class="subpanel-title"><span class="mini-dot"></span>Household Website</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+              <div class="subpanel-body">
+                <div class="ctrl-row"><span class="ctrl-label">Theme</span><span class="ctrl-value">Constellation Dark</span></div>
+                <div class="ctrl-row"><span class="ctrl-label">Home node binding</span><span class="ctrl-value">Web UI</span></div>
+                <div class="service-grid" id="website-service-grid">
+                  <div class="mini-stat"><div class="k">Web UI</div><div class="v" id="website-webui-status">online</div><div class="sub">Current constellation shell.</div></div>
+                  <div class="mini-stat"><div class="k">Household</div><div class="v" id="website-household-status">checking…</div><div class="sub">Household chat surface on LAN/local.</div></div>
+                </div>
+                <div class="btn-row">
+                  <button class="btn btn-primary" onclick="openCurrentNeuralUi()">Open Neural UI</button>
+                  <button class="btn btn-ghost" onclick="openClassicUi()">Open Classic UI</button>
+                  <button class="btn btn-ghost" onclick="openStateRenderer()">Open Visual State</button>
+                  <button class="btn btn-ghost" onclick="openHouseholdUi()">Open Household Chat</button>
+                  <button class="btn btn-ghost" onclick="startHouseholdFromWebsite()">Start Household</button>
+                </div>
+                <div class="btn-row" style="margin-top:8px;"><button class="btn btn-ghost" data-open-focus="website">Inspect page map</button><button class="btn btn-ghost" onclick="openNodeDeployPage()">Open Node Deploy</button></div>
+                <div class="panel-note" id="website-panel-note">Website controls now drive real open/start actions instead of placeholder section editing.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-card" data-panel="settings">
+          <div class="panel-card-header"><div class="panel-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/></svg>Settings</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="panel-card-body">
+            <div class="toggle-wrap"><span class="toggle-label">Live packet trails</span><label class="toggle"><input type="checkbox" id="toggle-packets" checked><span class="toggle-track"></span><span class="toggle-thumb"></span></label></div>
+            <div class="toggle-wrap"><span class="toggle-label">Live metrics smoothing</span><label class="toggle"><input type="checkbox" id="toggle-metrics" checked><span class="toggle-track"></span><span class="toggle-thumb"></span></label></div>
+          </div>
+        </section>
+
+        <section class="panel-card" data-panel="automation">
+          <div class="panel-card-header"><div class="panel-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Automation</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="panel-card-body">
+            <div class="service-grid" id="automation-service-grid">
+              <div class="mini-stat"><div class="k">Gateway</div><div class="v" id="service-gateway-status">checking…</div><div class="sub" id="service-gateway-detail">Not yet loaded.</div></div>
+              <div class="mini-stat"><div class="k">Household</div><div class="v" id="service-household-status">checking…</div><div class="sub" id="service-household-detail">Not yet loaded.</div></div>
+              <div class="mini-stat"><div class="k">Model Server</div><div class="v" id="service-model-status">checking…</div><div class="sub" id="service-model-detail">Tracks local llama-server ports.</div></div>
+              <div class="mini-stat"><div class="k">Web UI</div><div class="v" id="service-webui-status">online</div><div class="sub" id="service-webui-detail">Current Flask shell.</div></div>
+            </div>
+            <div class="btn-row" style="margin-top:10px;">
+              <button class="btn btn-primary" onclick="controlService('gateway','start')">Start Gateway</button>
+              <button class="btn btn-ghost" onclick="controlService('gateway','restart')">Restart Gateway</button>
+              <button class="btn btn-ghost" onclick="controlService('gateway','stop')">Stop Gateway</button>
+            </div>
+            <div class="btn-row" style="margin-top:8px;">
+              <button class="btn btn-primary" onclick="controlService('household','start')">Start Household</button>
+              <button class="btn btn-ghost" onclick="controlService('household','restart')">Restart Household</button>
+              <button class="btn btn-ghost" onclick="controlService('household','stop')">Stop Household</button>
+              <button class="btn btn-ghost" onclick="refreshServiceStatus()">Refresh Services</button>
+            </div>
+            <div class="panel-note" id="automation-note">Automation now exposes real service lifecycle controls for gateway and household chat.</div>
+          </div>
+        </section>
+
+        <section class="panel-card open" data-panel="packets">
+          <div class="panel-card-header"><div class="panel-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>Packet Stream</div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></div>
+          <div class="panel-card-body">
+            <div class="packet-log" id="packet-log"></div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+
+    <section id="chat-panel">
+      <div class="panel-header">
+          <span class="panel-title">Household Chat</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="chat-toggle-btn" class="panel-action-btn panel-toggle-btn" title="Collapse" aria-expanded="true">
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <button class="panel-action-btn" onclick="clearChat()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/></svg></button>
+          </div>
+      </div>
+      <div id="chat-messages" aria-live="polite">
+        <div class="msg assistant"><div class="msg-bubble">Hello. Packet visualization is live. Ask something that should trigger memory and you'll see the route.</div><span class="msg-meta">Mykro · just now</span></div>
+      </div>
+      <div id="chat-input-bar">
+        <textarea id="chat-input" rows="1" placeholder="Ask Mykro anything…"></textarea>
+        <button class="attach-btn" id="chat-attach-btn" title="Attach text files" aria-label="Attach files">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-8.49 8.49a5 5 0 0 1-7.07-7.07l8.49-8.49a3.5 3.5 0 0 1 4.95 4.95l-8.5 8.49a2 2 0 1 1-2.83-2.83l7.78-7.78"/></svg>
+        </button>
+        <input id="chat-attach-input" type="file" multiple accept=".txt,.md,.py,.json,.yaml,.yml,.csv,.log,.html,.js,.ts,.tsx,.jsx,.css,.xml" style="display:none" />
+        <button class="send-btn" onclick="sendMessage()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+      </div>
+      <div id="chat-attach-list"></div>
+    </section>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  const tabBtns = [...document.querySelectorAll('.tab-btn')];
+  const railBtns = [...document.querySelectorAll('.rail-btn')];
+  const panelCards = [...document.querySelectorAll('.panel-card')];
+  const subpanels = [...document.querySelectorAll('.subpanel')];
+  const focusOverlay = document.getElementById('focus-overlay');
+  const focusBody = document.getElementById('focus-body');
+  const focusTitle = document.getElementById('focus-title');
+  const focusSub = document.getElementById('focus-sub');
+  const focusBack = document.getElementById('focus-back');
+  const focusActionBtn = document.getElementById('focus-action-btn');
+  const focusTabJump = document.getElementById('focus-tab-jump');
+  const packetLog = document.getElementById('packet-log');
+  const memoryEventLog = document.getElementById('memory-event-log');
+  const messagesEl = document.getElementById('chat-messages');
+  const chatInput = document.getElementById('chat-input');
+  const chatInputBar = document.getElementById('chat-input-bar');
+  const chatAttachBtn = document.getElementById('chat-attach-btn');
+  const chatAttachInput = document.getElementById('chat-attach-input');
+  const chatAttachList = document.getElementById('chat-attach-list');
+  const memoryFilter = document.getElementById('memory-filter');
+  const stateRenderCanvas = document.getElementById('state-render-canvas');
+  const stateRenderSourceEl = document.getElementById('state-render-source');
+  const stateRenderSessionEl = document.getElementById('state-render-session');
+  const stateRenderStatusEl = document.getElementById('state-render-status');
+  const stateMetaEntropy = document.getElementById('state-meta-entropy');
+  const stateMetaDominance = document.getElementById('state-meta-dominance');
+  const stateMetaBranch = document.getElementById('state-meta-branch');
+  const stateMetaFallback = document.getElementById('state-meta-fallback');
+  const CHAT_INPUT_MAX_CHARS = 12000;
+  const CHAT_ATTACH_MAX_FILES = 5;
+  const CHAT_ATTACH_MAX_BYTES_PER_FILE = 256 * 1024;
+  const CHAT_ATTACH_MAX_TOTAL_BYTES = 768 * 1024;
+  const CHAT_ATTACH_MAX_CHARS_PER_FILE = 12000;
+
+  const state = {
+    theme: 'dark', activeTab: 'server', focusedNode: null,
+    packetCount: 0, packetTrailsEnabled: true,
+    metrics: { latency: 18, uptime: '00:00:00', model: 'idle', queue: 0, context: 0 },
+    memories: [],
+    nodes: [],
+    packets: [],
+    packetBursts: [],
+    responseCounter: 0,
+  };
+
+  const stateRenderer = {
+    snapshot: null,
+    source: 'none',
+    animFrame: 0,
+    startedAt: performance.now(),
+    width: 0,
+    height: 0,
+  };
+
+  const stateRenderCtx = stateRenderCanvas ? stateRenderCanvas.getContext('2d') : null;
+
+  function clamp01(v) {
+    return Math.max(0, Math.min(1, Number(v || 0)));
+  }
+
+  function mulberry32(seed) {
+    let t = seed >>> 0;
+    return () => {
+      t += 0x6D2B79F5;
+      let z = Math.imul(t ^ (t >>> 15), t | 1);
+      z ^= z + Math.imul(z ^ (z >>> 7), z | 61);
+      return ((z ^ (z >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function resizeStateRenderer() {
+    if (!stateRenderCanvas || !stateRenderCtx) return;
+    const rect = stateRenderCanvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    stateRenderer.width = Math.max(1, Math.floor(rect.width));
+    stateRenderer.height = Math.max(1, Math.floor(rect.height));
+    stateRenderCanvas.width = Math.floor(stateRenderer.width * dpr);
+    stateRenderCanvas.height = Math.floor(stateRenderer.height * dpr);
+    stateRenderCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function drawStateSnapshotFrame(now) {
+    if (!stateRenderCtx || !stateRenderCanvas) return;
+    const w = stateRenderer.width || stateRenderCanvas.clientWidth || 200;
+    const h = stateRenderer.height || stateRenderCanvas.clientHeight || 120;
+    if (!stateRenderer.snapshot) {
+      stateRenderCtx.clearRect(0, 0, w, h);
+      return;
+    }
+
+    const s = stateRenderer.snapshot;
+    const seed = Number(s.render_seed || 1) >>> 0;
+    const rand = mulberry32(seed);
+    const t = (now - stateRenderer.startedAt) / 1000;
+
+    const entropy = clamp01(s.entropy_proxy);
+    const dominance = clamp01(s.top_choice_dominance);
+    const spread = clamp01(s.branch_spread);
+    const drift = clamp01(s.centroid_drift);
+    const memory = clamp01(s.memory_pressure);
+    const fallback = clamp01(s.fallback_proximity);
+    const danger = clamp01(s.danger_resemblance_score);
+    const tools = clamp01(s.tool_activity_intensity);
+    const rejected = Math.max(0, Number(s.rejected_branch_count || 0));
+
+    const hue = Math.round(190 - danger * 105 + fallback * 25);
+    const coreAlpha = 0.2 + dominance * 0.6;
+    const fogAlpha = 0.18 + entropy * 0.35 + memory * 0.15;
+    const turbulence = 10 + entropy * 38;
+    const lobeCount = 1 + Math.round(spread * 4);
+    const driftAngle = ((seed % 360) * Math.PI / 180) + t * (0.2 + drift * 0.8);
+    const driftX = Math.cos(driftAngle) * (6 + drift * 22);
+    const driftY = Math.sin(driftAngle) * (4 + drift * 18);
+
+    stateRenderCtx.clearRect(0, 0, w, h);
+
+    // base atmosphere
+    const bg = stateRenderCtx.createRadialGradient(w * 0.5, h * 0.55, 8, w * 0.5, h * 0.55, Math.max(w, h) * 0.7);
+    bg.addColorStop(0, `hsla(${hue}, 90%, 60%, ${0.2 + danger * 0.18})`);
+    bg.addColorStop(1, `hsla(${hue + 30}, 70%, 8%, 0.92)`);
+    stateRenderCtx.fillStyle = bg;
+    stateRenderCtx.fillRect(0, 0, w, h);
+
+    // lobed plumes (branch spread)
+    for (let i = 0; i < lobeCount; i += 1) {
+      const phase = (Math.PI * 2 * i) / lobeCount;
+      const cx = w * 0.5 + Math.cos(phase + t * 0.12) * (20 + spread * 30) + driftX * 0.35;
+      const cy = h * 0.52 + Math.sin(phase + t * 0.1) * (14 + spread * 20) + driftY * 0.35;
+      const radius = 24 + spread * 34 + (Math.sin(t * 0.7 + i) * turbulence * 0.12);
+      const plume = stateRenderCtx.createRadialGradient(cx, cy, 2, cx, cy, radius);
+      plume.addColorStop(0, `hsla(${hue - 10}, 95%, 62%, ${fogAlpha})`);
+      plume.addColorStop(1, `hsla(${hue + 18}, 80%, 20%, 0)`);
+      stateRenderCtx.fillStyle = plume;
+      stateRenderCtx.beginPath();
+      stateRenderCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+      stateRenderCtx.fill();
+    }
+
+    // dominance core
+    const core = stateRenderCtx.createRadialGradient(w * 0.5 + driftX * 0.1, h * 0.52 + driftY * 0.1, 1, w * 0.5, h * 0.52, 34 + dominance * 42);
+    core.addColorStop(0, `hsla(${hue - 24}, 100%, 88%, ${coreAlpha})`);
+    core.addColorStop(0.45, `hsla(${hue - 8}, 96%, 62%, ${coreAlpha * 0.8})`);
+    core.addColorStop(1, `hsla(${hue + 25}, 90%, 18%, 0)`);
+    stateRenderCtx.fillStyle = core;
+    stateRenderCtx.beginPath();
+    stateRenderCtx.arc(w * 0.5, h * 0.52, 46 + dominance * 40, 0, Math.PI * 2);
+    stateRenderCtx.fill();
+
+    // deterministic particle field (entropy + memory pressure)
+    const particles = 45 + Math.round(entropy * 60 + memory * 35);
+    for (let i = 0; i < particles; i += 1) {
+      const pr = mulberry32((seed + i * 7919) >>> 0);
+      const px0 = pr() * w;
+      const py0 = pr() * h;
+      const amp = 2 + entropy * 8;
+      const px = px0 + Math.sin(t * (0.6 + pr()) + i) * amp + driftX * 0.12;
+      const py = py0 + Math.cos(t * (0.5 + pr()) + i * 0.8) * amp + driftY * 0.12;
+      const rr = 0.5 + pr() * (1.1 + memory * 1.4);
+      const pa = 0.08 + pr() * (0.22 + entropy * 0.16);
+      stateRenderCtx.fillStyle = `hsla(${hue - 6}, 100%, 80%, ${pa})`;
+      stateRenderCtx.beginPath();
+      stateRenderCtx.arc(px, py, rr, 0, Math.PI * 2);
+      stateRenderCtx.fill();
+    }
+
+    // rejected branch ghost wisps
+    const wisps = Math.min(8, rejected);
+    for (let i = 0; i < wisps; i += 1) {
+      const pr = mulberry32((seed + 100000 + i * 3571) >>> 0);
+      const x = pr() * w;
+      const y = pr() * h;
+      const rw = 18 + pr() * 26;
+      const rh = 8 + pr() * 12;
+      stateRenderCtx.strokeStyle = `hsla(${hue + 40}, 70%, 72%, ${0.1 + pr() * 0.16})`;
+      stateRenderCtx.lineWidth = 1;
+      stateRenderCtx.beginPath();
+      stateRenderCtx.ellipse(x + Math.sin(t + i) * 3, y + Math.cos(t * 0.8 + i) * 2, rw, rh, pr() * Math.PI, 0, Math.PI * 2);
+      stateRenderCtx.stroke();
+    }
+
+    // fallback/danger edge instability
+    if (fallback > 0.05 || danger > 0.05) {
+      const pulse = 0.2 + Math.abs(Math.sin(t * (2 + danger * 3))) * (0.25 + fallback * 0.4);
+      stateRenderCtx.strokeStyle = `hsla(${20 + danger * 15}, 95%, 60%, ${pulse})`;
+      stateRenderCtx.lineWidth = 1.5 + fallback * 1.8;
+      stateRenderCtx.strokeRect(1, 1, w - 2, h - 2);
+    }
+
+    // tool impulses
+    const bursts = Math.round(tools * 5);
+    for (let i = 0; i < bursts; i += 1) {
+      const angle = ((seed + i * 73) % 360) * Math.PI / 180;
+      const bx = w * 0.5 + Math.cos(angle + t * 1.4) * (14 + i * 8);
+      const by = h * 0.52 + Math.sin(angle + t * 1.2) * (12 + i * 6);
+      const rad = 3 + Math.abs(Math.sin(t * 2.4 + i)) * (4 + tools * 8);
+      stateRenderCtx.strokeStyle = `hsla(${hue - 35}, 100%, 75%, ${0.14 + tools * 0.35})`;
+      stateRenderCtx.beginPath();
+      stateRenderCtx.arc(bx, by, rad, 0, Math.PI * 2);
+      stateRenderCtx.stroke();
+    }
+
+    stateRenderer.animFrame = requestAnimationFrame(drawStateSnapshotFrame);
+  }
+
+  function startStateRendererLoop() {
+    if (!stateRenderCtx) return;
+    cancelAnimationFrame(stateRenderer.animFrame);
+    stateRenderer.startedAt = performance.now();
+    stateRenderer.animFrame = requestAnimationFrame(drawStateSnapshotFrame);
+  }
+
+  function updateStateMeta(snapshot, source, statusText = '') {
+    if (!snapshot) {
+      stateRenderSourceEl.textContent = 'No snapshot loaded';
+      stateRenderSessionEl.textContent = `session: ${chatSessionId || 'global-latest'}`;
+      stateMetaEntropy.textContent = '—';
+      stateMetaDominance.textContent = '—';
+      stateMetaBranch.textContent = '—';
+      stateMetaFallback.textContent = '—';
+      stateRenderStatusEl.textContent = statusText || 'Press a render button to draw telemetry-driven state.';
+      return;
+    }
+    stateRenderSourceEl.textContent = source === 'previous' ? 'Previous Generation State' : 'Current State';
+    stateRenderSessionEl.textContent = `session: ${snapshot.session_id || 'unknown'}`;
+    stateMetaEntropy.textContent = clamp01(snapshot.entropy_proxy).toFixed(3);
+    stateMetaDominance.textContent = clamp01(snapshot.top_choice_dominance).toFixed(3);
+    stateMetaBranch.textContent = clamp01(snapshot.branch_spread).toFixed(3);
+    stateMetaFallback.textContent = clamp01(snapshot.fallback_proximity).toFixed(3);
+    stateRenderStatusEl.textContent = statusText || `generation ${snapshot.generation_id} · model ${snapshot.active_model}`;
+  }
+
+  async function fetchStateSnapshot(source) {
+    const primary = source === 'previous' ? '/api/state-renderer/previous' : '/api/state-renderer/current';
+    const fallback = source === 'previous' ? '/api/state_renderer/previous' : '/api/state_renderer/current';
+    const endpoints = [primary, fallback];
+    let lastError = null;
+    const missingRoutes = [];
+
+    for (const endpoint of endpoints) {
+      const query = chatSessionId ? `?session_id=${encodeURIComponent(chatSessionId)}` : '';
+      const url = `${endpoint}${query}`;
+      let resp;
+      try {
+        resp = await fetchWithTimeout(url, 10000);
+      } catch (err) {
+        throw new Error(`Renderer backend is offline or unreachable at ${endpoint}. ${err?.message || err}`);
+      }
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok) {
+        return data;
+      }
+      const reason = data.reason || data.error || `Renderer request failed (${resp.status})`;
+      lastError = new Error(`${endpoint} failed: ${reason}`);
+      if (resp.status === 404) {
+        missingRoutes.push(endpoint);
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (missingRoutes.length === endpoints.length) {
+      throw new Error(`Renderer route is missing (${missingRoutes.join(' and ')})`);
+    }
+    throw lastError || new Error('Renderer request failed (404)');
+  }
+
+  async function renderStateMode(source) {
+    try {
+      updateStateMeta(null, source, `Loading ${source} telemetry snapshot…`);
+      const data = await fetchStateSnapshot(source);
+      if (!data.available || !data.snapshot) {
+        stateRenderer.snapshot = null;
+        cancelAnimationFrame(stateRenderer.animFrame);
+        if (stateRenderCtx) {
+          stateRenderCtx.clearRect(0, 0, stateRenderer.width || 300, stateRenderer.height || 150);
+        }
+        updateStateMeta(null, source, data.reason || 'No snapshot available for this mode.');
+        return;
+      }
+      stateRenderer.snapshot = data.snapshot;
+      stateRenderer.source = source;
+      updateStateMeta(data.snapshot, source, `Telemetry source: ${data.snapshot.selected_route || 'unknown'} · seed ${data.snapshot.render_seed}`);
+      startStateRendererLoop();
+      emitPacket('webui', 'state-renderer', 'render', source);
+    } catch (err) {
+      stateRenderer.snapshot = null;
+      cancelAnimationFrame(stateRenderer.animFrame);
+      updateStateMeta(null, source, `State render failed: ${err.message || err}`);
+    }
+  }
+
+  const CHAT_SYSTEM_PROMPT = 'You are MYKRO, a helpful local AI assistant. Maintain conversational continuity across turns and keep replies natural and concise unless the user asks for detail.';
+  const CHAT_MAX_TURNS = 12;
+  const CHAT_SESSION_ID_KEY = 'mykro_neural_chat_session_id';
+  let chatHistory = [];
+  let pendingAttachments = [];
+
+  function _createSessionId() {
+    try {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+    } catch {}
+    return `neural-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  async function fetchWithTimeout(url, timeoutMs, options = {}) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+    }
+
+    if (typeof AbortController === 'undefined') {
+      return fetch(url, options);
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function _sessionFromUrl() {
+    try {
+      const fromQuery = new URLSearchParams(window.location.search).get('session_id');
+      return fromQuery ? String(fromQuery).trim() : '';
+    } catch {
+      return '';
+    }
+  }
+
+  function _getSessionId(reset = false) {
+    const querySessionId = _sessionFromUrl();
+    if (querySessionId) {
+      try { sessionStorage.setItem(CHAT_SESSION_ID_KEY, querySessionId); } catch {}
+      if (!reset) return querySessionId;
+    }
+    if (reset) {
+      const fresh = _createSessionId();
+      try { sessionStorage.setItem(CHAT_SESSION_ID_KEY, fresh); } catch {}
+      return fresh;
+    }
+    try {
+      const existing = sessionStorage.getItem(CHAT_SESSION_ID_KEY);
+      if (existing) return existing;
+    } catch {}
+    const fresh = _createSessionId();
+    try { sessionStorage.setItem(CHAT_SESSION_ID_KEY, fresh); } catch {}
+    return fresh;
+  }
+
+  let chatSessionId = _getSessionId();
+
+  function _pushChatHistory(role, content) {
+    const cleanRole = String(role || '').toLowerCase();
+    const cleanContent = String(content || '').trim();
+    if (!['user', 'assistant', 'system'].includes(cleanRole) || !cleanContent) return;
+    chatHistory.push({ role: cleanRole, content: cleanContent });
+    const maxMessages = CHAT_MAX_TURNS * 2;
+    if (chatHistory.length > maxMessages) {
+      chatHistory = chatHistory.slice(-maxMessages);
+    }
+  }
+
+  function _resetChatHistory() {
+    chatHistory = [];
+    chatSessionId = _getSessionId(true);
+  }
+
+  const NODE_CONFIG = [
+    { id:'webui', label:'Web UI', x:.50, y:.50, r:11, tab:'website', panel:'website', accent:'primary', desc:'Primary shell, route host, and interaction layer.' },
+    { id:'chat', label:'Household Chat', x:.29, y:.27, r:8, tab:'server', panel:'server', accent:'primary', desc:'Prompt intake, stream output, and UX messaging layer.' },
+    { id:'health', label:'Health Banner', x:.69, y:.22, r:7, tab:'system', panel:'server', accent:'primary', desc:'Health signal, uptime, latency, and connection status.' },
+    { id:'memory', label:'Memory Store', x:.77, y:.58, r:8, tab:'memory', panel:'memory', accent:'accent', desc:'Persistent recall cache and retrieval subsystem.' },
+    { id:'doctor', label:'Doctor API', x:.64, y:.78, r:7, tab:'doctor', panel:'doctor', accent:'accent', desc:'Route inspection, endpoint health, and wiring diagnostics.' },
+    { id:'server', label:'Model Server', x:.26, y:.70, r:8, tab:'server', panel:'server', accent:'primary', desc:'Inference engine, active model, queue, and context window.' },
+    { id:'automation', label:'Automation', x:.18, y:.44, r:7, tab:'automation', panel:'automation', accent:'accent', desc:'Schedulers, restarts, and background process controls.' }
+  ];
+  // Neural Constellation node contracts (intent/success/failure) used by runtime handlers below.
+  const NODE_CONTRACTS = {
+    webui: {
+      intent: 'Open/focus the MYKRO Neural Web UI and confirm it is reachable.',
+      success: 'A browser tab opens and /api/health responds.',
+      failure: 'Show explicit Web UI unreachable status with reason.',
+    },
+    server: {
+      intent: 'Connect to Model Server controls and refresh status.',
+      success: 'Server panel opens and health/model status loads.',
+      failure: 'Show model backend unavailable message with HTTP detail.',
+    },
+    automation: {
+      intent: 'Open Automation controls and verify automation surface availability.',
+      success: 'Automation panel opens and /api/automation/status reports available.',
+      failure: 'Show “Automation not configured / not available” explicitly.',
+    },
+    chat: {
+      intent: 'Open Household Chat surface and verify endpoint reachability.',
+      success: 'Household endpoint reachable and tab can be opened.',
+      failure: 'Show household offline/unconfigured status clearly.',
+    },
+    health: {
+      intent: 'Refresh and display health telemetry/metrics.',
+      success: 'Health banner/metrics update with latest status.',
+      failure: 'Show “Health endpoint unavailable” in UI.',
+    },
+    memory: {
+      intent: 'Open Memory Store panel and verify memory API responses.',
+      success: 'Memory panel lists entries (or empty list) from API.',
+      failure: 'Show memory backend unavailable message with reason.',
+    },
+    doctor: {
+      intent: 'Open diagnostics and fetch doctor/system-report summary.',
+      success: 'Doctor panel loads wiring + system-report summary.',
+      failure: 'Show doctor/system-report endpoint unavailable message.',
+    },
+  };
+  const LINKS = [['webui','chat'],['webui','health'],['webui','memory'],['webui','doctor'],['webui','server'],['webui','automation'],['chat','server'],['server','memory'],['memory','server'],['doctor','server']];
+
+  const focusTemplates = {
+    website: {
+      title:'Household Website', sub:'Settings expansion · click-to-drill state', action:'Open website settings',
+      sections:[
+        { title:'Node behavior', items:[
+          ['Click result','Expands into the website settings subtree rather than just switching tabs'],
+          ['Back behavior','Collapses back into the original constellation node'],
+          ['UI intent','Make the constellation feel like a living site map, not just decoration']
+        ]},
+        { title:'Site controls', items:[
+          ['Homepage binding','Web UI node controls the default rendered experience'],
+          ['Section focus','Household site node opens deeper controls for theme, pages, and content sections'],
+          ['State model','Overlay remembers what node spawned it until Back is used']
+        ]}
+      ]
+    },
+    server: {
+      title:'Model Server', sub:'Inference, queue, and response generation', action:'Inspect model state',
+      sections:[
+        { title:'Runtime', items:[
+          ['Active model','Reads from /api/models and health state'],
+          ['Queue tracking','Shows live-ish queue and response counters'],
+          ['Latency','Metric chip updates continuously with smoothing when enabled']
+        ]},
+        { title:'Behavior visibility', items:[
+          ['Prompt route','Chat → Model Server packet is emitted immediately'],
+          ['Memory branch','If message suggests recall, packet route expands to Memory Store'],
+          ['Return flow','Memory Store → Model Server rebound packet appears before answer render']
+        ]}
+      ]
+    },
+    memory: {
+      title:'Memory Store', sub:'Recall, retrieval triggers, and rebound packets', action:'Inspect memory usage',
+      sections:[
+        { title:'When memory fires', items:[
+          ['Likely triggers','Messages containing remember, memory, recall, previous, context, before, or names'],
+          ['Visual trace','Request packet travels from chat/model to memory, then rebound packet returns'],
+          ['Evidence log','Memory event log records retrieval moments and selected memory keys']
+        ]},
+        { title:'Operator visibility', items:[
+          ['Memory chips','Shows current known memories or fallback placeholders'],
+          ['Event history','Each retrieval is timestamped in the panel'],
+          ['Goal','Make "it remembered" visibly legible, not implied']
+        ]}
+      ]
+    },
+    doctor: {
+      title:'Doctor API', sub:'Routes, diagnostics, and endpoint visibility', action:'Run route inspection',
+      sections:[
+        { title:'Checks', items:[
+          ['Endpoints','Health, completion, memories, models, model start/stop/reload, wiring, emergency stop'],
+          ['Surface','Wiring table stays visible for fast route confidence'],
+          ['Fallback','Static rows appear cleanly if backend data is unavailable']
+        ]}
+      ]
+    },
+    automation: {
+      title:'Automation', sub:'Background rules and scheduler behavior', action:'Inspect automation',
+      sections:[
+        { title:'Managed flows', items:[
+          ['Auto restart','Designed for process resiliency'],
+          ['Ping cadence','Health checks maintain live metrics feel'],
+          ['Packet meaning','Automation-origin packets can be shown distinctly from chat or memory routes']
+        ]}
+      ]
+    },
+    health: {
+      title:'Health Banner', sub:'Live telemetry and connection confidence', action:'Inspect telemetry',
+      sections:[
+        { title:'Signals', items:[
+          ['Latency','Displayed in the lower metric rail and banner state'],
+          ['Uptime','Continuously increments between backend refreshes'],
+          ['Status chip','Online, degraded, or offline with colored dot feedback']
+        ]}
+      ]
+    },
+    chat: {
+      title:'Household Chat', sub:'Prompt ingress and response stream surface', action:'Inspect chat flow',
+      sections:[
+        { title:'Flow map', items:[
+          ['On send','Chat packet departs instantly toward Model Server'],
+          ['On memory need','Branch packet diverts to Memory Store'],
+          ['On response','Answer returns to chat after model completes']
+        ]}
+      ]
+    }
+  };
+
+  function setTheme(theme) {
+    state.theme = theme;
+    root.setAttribute('data-theme', theme);
+  }
+  setTheme('dark');
+  document.querySelector('[data-theme-toggle]').addEventListener('click', () => setTheme(state.theme === 'dark' ? 'light' : 'dark'));
+
+  function activateTab(tab) {
+    const sameTab = state.activeTab === tab;
+    state.activeTab = tab;
+    tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    railBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    if (tab === 'memory') openPanel('memory', { toggleTarget: sameTab });
+    if (tab === 'doctor') openPanel('doctor', { toggleTarget: sameTab });
+    if (tab === 'website') openPanel('website', { toggleTarget: sameTab });
+    if (tab === 'server') openPanel('server', { toggleTarget: sameTab });
+    if (tab === 'automation') openPanel('automation', { toggleTarget: sameTab });
+    if (tab === 'settings') openPanel('settings', { toggleTarget: sameTab });
+  }
+  [...tabBtns, ...railBtns].forEach(btn => btn.addEventListener('click', () => activateTab(btn.dataset.tab)));
+
+  function openPanel(name, opts = {}) {
+    const toggleTarget = Boolean(opts.toggleTarget);
+    const target = panelCards.find(card => card.dataset.panel === name);
+    if (!target) return;
+    if (toggleTarget) {
+      target.classList.toggle('open');
+      return;
+    }
+    panelCards.forEach(card => {
+      if (card.dataset.panel === name || card.dataset.panel === 'packets') {
+        card.classList.add('open');
+      }
+    });
+  }
+  panelCards.forEach(card => {
+    card.querySelector('.panel-card-header').addEventListener('click', () => card.classList.toggle('open'));
+  });
+  subpanels.forEach(sp => {
+    sp.querySelector('.subpanel-head').addEventListener('click', () => sp.classList.toggle('open'));
+  });
+
+  // Chat panel collapse/expand handling
+  const chatPanel = document.getElementById('chat-panel');
+  const chatToggleBtn = document.getElementById('chat-toggle-btn');
+  if (chatPanel && chatToggleBtn) {
+    chatToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const collapsed = chatPanel.classList.toggle('collapsed');
+      chatToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+      chatToggleBtn.title = collapsed ? 'Expand' : 'Collapse';
+    });
+    // Also toggle when clicking the header outside the action buttons
+    const chatHeader = chatPanel.querySelector('.panel-header');
+    if (chatHeader) {
+      chatHeader.addEventListener('click', (e) => {
+        if (e.target.closest('.panel-action-btn')) return; // ignore clicks on buttons inside header
+        const collapsed = chatPanel.classList.toggle('collapsed');
+        chatToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+        chatToggleBtn.title = collapsed ? 'Expand' : 'Collapse';
+      });
+    }
+  }
+
+  function fillFocus(templateKey) {
+    const t = focusTemplates[templateKey] || focusTemplates.server;
+    focusTitle.textContent = t.title;
+    focusSub.textContent = t.sub;
+    focusActionBtn.textContent = t.action;
+    focusBody.innerHTML = '';
+    t.sections.forEach(sec => {
+      const el = document.createElement('section');
+      el.className = 'focus-section';
+      el.innerHTML = `<h3>${sec.title}</h3><div class="focus-content"><div class="focus-list">${sec.items.map(([k,v]) => `<div class="focus-list-item"><strong>${k}:</strong> ${v}</div>`).join('')}</div></div>`;
+      focusBody.appendChild(el);
+    });
+  }
+
+  function openFocus(nodeId) {
+    const node = NODE_CONFIG.find(n => n.id === nodeId) || NODE_CONFIG[0];
+    state.focusedNode = nodeId;
+    activateTab(node.tab);
+    openPanel(node.panel);
+    if (node.id === 'webui') {
+      const websiteCard = document.querySelector('[data-panel="website"]');
+      websiteCard?.classList.add('open');
+      const siteSettings = document.querySelector('[data-sub="household-site"]');
+      siteSettings?.classList.add('open');
+      fillFocus('website');
+    } else {
+      fillFocus(node.id);
+    }
+    focusTabJump.onclick = () => activateTab(node.tab);
+    focusActionBtn.onclick = () => runNodeAction(node.id, 'focus-action');
+    focusOverlay.classList.add('active');
+  }
+  function closeFocus() {
+    focusOverlay.classList.remove('active');
+    state.focusedNode = null;
+  }
+  focusBack.addEventListener('click', closeFocus);
+  focusOverlay.addEventListener('click', e => { if (e.target === focusOverlay) closeFocus(); });
+  document.querySelectorAll('[data-open-focus]').forEach(btn => btn.addEventListener('click', () => openFocus(btn.dataset.openFocus === 'website' ? 'webui' : btn.dataset.openFocus)));
+
+  async function logNodeInteraction(nodeLabel, source, outcome, details = {}) {
+    const payload = {
+      node: nodeLabel,
+      source,
+      outcome,
+      timestamp: Date.now(),
+      details,
+    };
+    try {
+      await fetch('/api/node-interactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      // Best-effort observability: do not break UI flow if logging endpoint is down.
+    }
+  }
+
+  function nodeErrorMessage(label, err) {
+    const msg = err && (err.message || String(err)) ? (err.message || String(err)) : 'unknown error';
+    return `${label}: ${msg}`;
+  }
+
+  function openUrlInTab(url) {
+    const handle = window.open(url, '_blank', 'noopener');
+    return Boolean(handle);
+  }
+
+  async function activateWebUiNode(source) {
+    const opened = openUrlInTab(`${location.origin}/`);
+    const r = await fetch('/api/constellation/status');
+    if (!r.ok) throw new Error(`Constellation status probe failed (${r.status}).`);
+    const status = await r.json().catch(() => ({}));
+    if (!status.web_ui_reachable) throw new Error('Web UI is not reachable.');
+    addSystemMessage(`Web UI node verified at ${location.origin}/ (${opened ? 'tab opened' : 'tab blocked by browser'}).`);
+    return { opened, status: 'reachable' };
+  }
+
+  async function activateModelServerNode() {
+    activateTab('server');
+    openPanel('server');
+    const [statusResp, modelsResp] = await Promise.all([
+      fetch('/api/constellation/status'),
+      fetch('/api/models'),
+    ]);
+    if (!statusResp.ok) throw new Error(`Constellation status probe failed (${statusResp.status}).`);
+    const status = await statusResp.json().catch(() => ({}));
+    const models = await modelsResp.json().catch(() => ({}));
+    const active = models.active || state.metrics.model || 'unknown';
+    if (!(status.gateway_reachable || status.legacy_model_reachable)) {
+      throw new Error(`Model backend unreachable (gateway=${status.gateway_detail || 'n/a'}, legacy=${status.legacy_model_detail || 'n/a'}).`);
+    }
+    addSystemMessage(`Model Server reachable. Active route: ${active}.`);
+    return { active, gateway_reachable: Boolean(status.gateway_reachable), legacy_model_reachable: Boolean(status.legacy_model_reachable) };
+  }
+
+  async function activateAutomationNode() {
+    activateTab('automation');
+    openPanel('automation');
+    const resp = await fetch('/api/automation/status', { signal: AbortSignal.timeout(10000) });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.available) {
+      const reason = data.reason || `status ${resp.status}`;
+      addSystemMessage(`Automation not configured / not available: ${reason}`);
+      throw new Error(`Automation not available: ${reason}`);
+    }
+    const launchers = Array.isArray(data.launchers) ? data.launchers.join(', ') : 'none';
+    addSystemMessage(`Automation available. Launchers: ${launchers}.`);
+    return { available: true, launchers: data.launchers || [] };
+  }
+
+  async function activateHouseholdNode() {
+    activateTab('server');
+    openPanel('server');
+    const resp = await fetch('/api/household/status', { signal: AbortSignal.timeout(10000) });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.available) {
+      const reason = data.reason || `status ${resp.status}`;
+      addSystemMessage(`Household Chat offline or not configured: ${reason}`);
+      throw new Error(`Household Chat offline: ${reason}`);
+    }
+    const opened = openUrlInTab(data.url || 'http://127.0.0.1:5001');
+    addSystemMessage(`Household Chat verified at ${(data.url || 'http://127.0.0.1:5001')} (${opened ? 'tab opened' : 'tab blocked by browser'}).`);
+    return { available: true, url: data.url, opened };
+  }
+
+  async function activateHealthNode() {
+    activateTab('system');
+    openPanel('server');
+    await checkHealth();
+    const statusResp = await fetch('/api/constellation/status');
+    if (!statusResp.ok) {
+      addSystemMessage('Health endpoint unavailable. Status probe failed.');
+      throw new Error(`Constellation status probe failed (${statusResp.status}).`);
+    }
+    const status = await statusResp.json().catch(() => ({}));
+    if (!(status.gateway_reachable || status.legacy_model_reachable)) {
+      addSystemMessage('Health endpoint unavailable. Model/gateway probes are offline.');
+      throw new Error(`Health endpoints unavailable (gateway=${status.gateway_detail || 'n/a'}, legacy=${status.legacy_model_detail || 'n/a'}).`);
+    }
+    const stamp = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    addSystemMessage(`Health Banner refreshed successfully at ${stamp}.`);
+    return { ok: true, updated_at: stamp, gateway_reachable: Boolean(status.gateway_reachable), legacy_model_reachable: Boolean(status.legacy_model_reachable) };
+  }
+
+  async function activateMemoryNode() {
+    activateTab('memory');
+    openPanel('memory');
+    await loadMemories();
+    const statusResp = await fetch('/api/constellation/status');
+    if (!statusResp.ok) throw new Error(`Constellation status probe failed (${statusResp.status}).`);
+    const status = await statusResp.json().catch(() => ({}));
+    if (!status.memory_reachable) {
+      throw new Error(`Memory endpoint unavailable (${status.memory_detail || 'unreachable'}).`);
+    }
+    const listResp = await fetch('/api/memories');
+    if (!listResp.ok) {
+      throw new Error(`Memory endpoint unavailable (${listResp.status}).`);
+    }
+    const data = await listResp.json().catch(() => ({}));
+    const items = Array.isArray(data.memories) ? data.memories : (Array.isArray(data.items) ? data.items : []);
+    addSystemMessage(`Memory Store responded with ${items.length} entr${items.length === 1 ? 'y' : 'ies'}.`);
+    return { count: items.length };
+  }
+
+  async function activateDoctorNode() {
+    activateTab('doctor');
+    openPanel('doctor');
+    await loadWiring();
+    const statusResp = await fetch('/api/constellation/status');
+    if (!statusResp.ok) throw new Error(`Constellation status probe failed (${statusResp.status}).`);
+    const status = await statusResp.json().catch(() => ({}));
+    if (!status.doctor_reachable) {
+      throw new Error(`Doctor/system-report endpoint unavailable (${status.doctor_detail || 'unreachable'}).`);
+    }
+    const resp = await fetch('/api/doctor-panel');
+    if (!resp.ok) {
+      throw new Error(`Doctor/system-report endpoint unavailable (${resp.status}).`);
+    }
+    const data = await resp.json().catch(() => ({}));
+    const keys = Object.keys(data || {});
+    addSystemMessage(`Doctor API summary loaded (${keys.length} top-level fields).`);
+    return { keys: keys.slice(0, 8) };
+  }
+
+  async function runNodeAction(nodeId, source = 'unknown') {
+    const node = NODE_CONFIG.find(n => n.id === nodeId);
+    if (!node) return;
+
+    const contract = NODE_CONTRACTS[nodeId] || {};
+    let details = { contract };
+    try {
+      emitPacket('webui', node.id, 'node-click', source);
+      if (nodeId === 'webui') details = { ...details, ...(await activateWebUiNode(source)) };
+      else if (nodeId === 'server') details = { ...details, ...(await activateModelServerNode()) };
+      else if (nodeId === 'automation') details = { ...details, ...(await activateAutomationNode()) };
+      else if (nodeId === 'chat') details = { ...details, ...(await activateHouseholdNode()) };
+      else if (nodeId === 'health') details = { ...details, ...(await activateHealthNode()) };
+      else if (nodeId === 'memory') details = { ...details, ...(await activateMemoryNode()) };
+      else if (nodeId === 'doctor') details = { ...details, ...(await activateDoctorNode()) };
+      await logNodeInteraction(node.label, source, 'success', details);
+    } catch (err) {
+      const reason = nodeErrorMessage(node.label, err);
+      addSystemMessage(reason);
+      await logNodeInteraction(node.label, source, 'failure', { ...details, error: reason });
+    }
+  }
+
+  const canvas = document.getElementById('constellation-canvas');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, stars = [], tick = 0;
+
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    W = rect.width; H = rect.height;
+    canvas.width = Math.max(1, Math.floor(W * devicePixelRatio));
+    canvas.height = Math.max(1, Math.floor(H * devicePixelRatio));
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    stars = Array.from({ length: Math.max(60, Math.floor(W*H/6500)) }, () => ({
+      x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.3+.25, phase: Math.random()*Math.PI*2, speed: .002+Math.random()*.004
+    }));
+    state.nodes = NODE_CONFIG.map(n => ({ ...n, px: n.x*W, py: n.y*H }));
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  function color(name) { return getComputedStyle(root).getPropertyValue(name).trim(); }
+
+  function emitPacket(from, to, type='data', meta='') {
+    if (!document.getElementById('toggle-packets')?.checked) return;
+    state.packetCount++;
+    document.getElementById('metric-packets').textContent = String(state.packetCount);
+    state.packetBursts.push({ from, to, t: 0, type, meta, born: performance.now() });
+    const ts = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const row = document.createElement('div');
+    row.className = 'packet-item';
+    row.innerHTML = `<span class="packet-type">${type.toUpperCase()}</span> <strong>${from}</strong> → <strong>${to}</strong>${meta ? ` · ${meta}` : ''}<span class="packet-time">${ts}</span>`;
+    packetLog.prepend(row);
+    while (packetLog.children.length > 18) packetLog.lastElementChild.remove();
+  }
+
+  function logMemoryEvent(text) {
+    const ts = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const row = document.createElement('div');
+    row.className = 'event-item';
+    row.innerHTML = `<strong>Memory event</strong> · ${text} <span class="packet-time">${ts}</span>`;
+    memoryEventLog.prepend(row);
+    while (memoryEventLog.children.length > 14) memoryEventLog.lastElementChild.remove();
+  }
+
+  function draw() {
+    const dark = state.theme === 'dark';
+    const bg = dark ? '#090b10' : '#eef3fb';
+    const starBase = dark ? 'rgba(190,210,255,0.42)' : 'rgba(70,110,180,0.28)';
+    const linkBase = dark ? 'rgba(86,199,255,0.13)' : 'rgba(18,124,195,0.12)';
+    const pulseColor = dark ? 'rgba(86,199,255,0.68)' : 'rgba(18,124,195,0.6)';
+    const nodePrimary = dark ? '#56c7ff' : '#127cc3';
+    const nodeAccent = dark ? '#baa8ff' : '#7147d8';
+    const text = dark ? 'rgba(220,228,245,0.88)' : 'rgba(21,32,51,0.88)';
+
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = bg; ctx.fillRect(0,0,W,H);
+
+    stars.forEach(s => {
+      const a = (.35 + (Math.sin(tick*s.speed + s.phase)+1)/2*.6).toFixed(2);
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fillStyle = starBase.replace(/0\.42|0\.28/, a); ctx.fill();
+    });
+
+    const nodesById = Object.fromEntries(state.nodes.map(n => [n.id, n]));
+    LINKS.forEach((pair, i) => {
+      const a = nodesById[pair[0]], b = nodesById[pair[1]]; if (!a || !b) return;
+      const grad = ctx.createLinearGradient(a.px, a.py, b.px, b.py);
+      grad.addColorStop(0, linkBase);
+      grad.addColorStop(.5, pulseColor);
+      grad.addColorStop(1, linkBase);
+      ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.strokeStyle = grad; ctx.lineWidth = 1; ctx.stroke();
+    });
+
+    const now = performance.now();
+    state.packetBursts = state.packetBursts.filter(p => now - p.born < 1400);
+    state.packetBursts.forEach(p => {
+      const a = nodesById[p.from], b = nodesById[p.to]; if (!a || !b) return;
+      const t = Math.min(1, (now - p.born) / 1400);
+      const x = a.px + (b.px - a.px) * t;
+      const y = a.py + (b.py - a.py) * t;
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI*2); ctx.fillStyle = pulseColor; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI*2); ctx.strokeStyle = pulseColor; ctx.globalAlpha = 1-t; ctx.stroke(); ctx.globalAlpha = 1;
+    });
+
+    state.nodes.forEach((n, idx) => {
+      const baseColor = n.accent === 'accent' ? nodeAccent : nodePrimary;
+      const pulse = (Math.sin(tick*.04 + idx*.85)+1)/2;
+      const glowR = n.r + 6 + pulse*7;
+      const grad = ctx.createRadialGradient(n.px, n.py, n.r*.3, n.px, n.py, glowR);
+      grad.addColorStop(0, baseColor + 'cc');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.beginPath(); ctx.arc(n.px, n.py, glowR, 0, Math.PI*2); ctx.fillStyle = grad; ctx.fill();
+      ctx.beginPath(); ctx.arc(n.px, n.py, n.r + 3 + pulse*4, 0, Math.PI*2); ctx.strokeStyle = baseColor + '44'; ctx.lineWidth = .8; ctx.stroke();
+      const core = ctx.createRadialGradient(n.px-2, n.py-2, 1, n.px, n.py, n.r);
+      core.addColorStop(0, '#ffffff'); core.addColorStop(.45, baseColor); core.addColorStop(1, baseColor + 'cc');
+      ctx.beginPath(); ctx.arc(n.px, n.py, n.r, 0, Math.PI*2); ctx.fillStyle = core; ctx.fill();
+      ctx.font = "600 11px 'General Sans', sans-serif"; ctx.textAlign = 'center'; ctx.fillStyle = text; ctx.fillText(n.label, n.px, n.py + n.r + 14);
+    });
+    tick++;
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const hit = state.nodes.some(n => Math.hypot(mx - n.px, my - n.py) < n.r + 12);
+    canvas.style.cursor = hit ? 'pointer' : 'default';
+  });
+  canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const hit = state.nodes.find(n => Math.hypot(mx - n.px, my - n.py) < n.r + 12);
+    if (hit) {
+      openFocus(hit.id);
+      runNodeAction(hit.id, 'constellation-click');
+    }
+  });
+
+  function addMsg(role, text) {
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    const who = role === 'user' ? 'You' : role === 'assistant' ? 'Mykro' : 'System';
+    const now = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+    div.innerHTML = `<div class="msg-bubble">${text}</div><span class="msg-meta">${who} · ${now}</span>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+  function addSystemMessage(text) { addMsg('system', text); }
+  function addTyping() {
+    const div = document.createElement('div');
+    div.className = 'msg assistant'; div.id = 'typing-indicator';
+    div.innerHTML = '<div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div><span class="msg-meta">Mykro · thinking</span>';
+    messagesEl.appendChild(div); messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+  function clearTyping() { document.getElementById('typing-indicator')?.remove(); }
+
+  function messageLikelyNeedsMemory(text) {
+    return /(remember|memory|recall|before|previous|you said|context|who am i|my preferences|what do you know)/i.test(text);
+  }
+
+  function renderAttachmentList() {
+    if (!chatAttachList) return;
+    if (!pendingAttachments.length) {
+      chatAttachList.innerHTML = '';
+      return;
+    }
+    chatAttachList.innerHTML = pendingAttachments.map((att, idx) => {
+      const trunc = att.truncated ? ' · truncated' : '';
+      return `<span class="attach-chip">${att.name} (${att.chars} chars${trunc}) <button type="button" data-attach-rm="${idx}" aria-label="Remove attachment">×</button></span>`;
+    }).join('');
+    chatAttachList.querySelectorAll('[data-attach-rm]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-attach-rm'));
+        if (!Number.isNaN(idx)) {
+          pendingAttachments.splice(idx, 1);
+          renderAttachmentList();
+        }
+      });
+    });
+  }
+
+  async function readAttachmentText(file) {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.readAsText(file);
+    });
+  }
+
+  async function addAttachmentFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    let totalBytes = pendingAttachments.reduce((sum, att) => sum + (att.size || 0), 0);
+    for (const file of files) {
+      if (pendingAttachments.length >= CHAT_ATTACH_MAX_FILES) {
+        addSystemMessage(`⚠ Attachment limit reached (${CHAT_ATTACH_MAX_FILES} files max).`);
+        break;
+      }
+      if (file.size > CHAT_ATTACH_MAX_BYTES_PER_FILE) {
+        addSystemMessage(`⚠ Skipped ${file.name}: file too large (${file.size} bytes).`);
+        continue;
+      }
+      if ((totalBytes + file.size) > CHAT_ATTACH_MAX_TOTAL_BYTES) {
+        addSystemMessage('⚠ Attachment total size limit reached.');
+        break;
+      }
+      try {
+        const raw = await readAttachmentText(file);
+        let text = raw;
+        let truncated = false;
+        if (text.length > CHAT_ATTACH_MAX_CHARS_PER_FILE) {
+          text = text.slice(0, CHAT_ATTACH_MAX_CHARS_PER_FILE);
+          truncated = true;
+        }
+        if (!text.trim()) {
+          addSystemMessage(`⚠ Skipped ${file.name}: empty or non-text file.`);
+          continue;
+        }
+        pendingAttachments.push({
+          name: file.name,
+          type: file.type || 'text/plain',
+          size: file.size,
+          content: text,
+          truncated,
+          chars: text.length,
+        });
+        totalBytes += file.size;
+      } catch {
+        addSystemMessage(`⚠ Failed to read ${file.name}.`);
+      }
+    }
+    renderAttachmentList();
+  }
+
+  function clipChatInput({ notify = false, origin = 'input' } = {}) {
+    if (!chatInput) return;
+    const value = chatInput.value || '';
+    if (value.length <= CHAT_INPUT_MAX_CHARS) return;
+    const original = value.length;
+    chatInput.value = value.slice(0, CHAT_INPUT_MAX_CHARS);
+    autoSize();
+    if (notify) {
+      addSystemMessage(`⚠ Input truncated to ${CHAT_INPUT_MAX_CHARS} characters (${origin}: ${original} chars).`);
+    }
+  }
+
+  function handleChatPaste(event) {
+    if (!chatInput) return;
+    const pasted = (event.clipboardData && event.clipboardData.getData('text')) || '';
+    if (!pasted) return;
+    const start = Number.isInteger(chatInput.selectionStart) ? chatInput.selectionStart : chatInput.value.length;
+    const end = Number.isInteger(chatInput.selectionEnd) ? chatInput.selectionEnd : start;
+    const existingAfterReplace = chatInput.value.length - Math.max(0, end - start);
+    const room = Math.max(0, CHAT_INPUT_MAX_CHARS - existingAfterReplace);
+    if (pasted.length <= room) return;
+    event.preventDefault();
+    const clipped = pasted.slice(0, room);
+    if (typeof chatInput.setRangeText === 'function') {
+      chatInput.setRangeText(clipped, start, end, 'end');
+    } else {
+      chatInput.value = `${chatInput.value.slice(0, start)}${clipped}${chatInput.value.slice(end)}`;
+    }
+    autoSize();
+    addSystemMessage(`⚠ Paste truncated to ${CHAT_INPUT_MAX_CHARS} characters (${pasted.length} chars received).`);
+  }
+
+  async function sendMessage() {
+    clipChatInput({ notify: true, origin: 'send' });
+    const text = chatInput.value.trim();
+    if (!text) return;
+    chatInput.value = ''; autoSize();
+    addMsg('user', text);
+    _pushChatHistory('user', text);
+    emitPacket('chat', 'server', 'prompt', 'user message');
+
+    const needsMemory = messageLikelyNeedsMemory(text);
+    if (needsMemory) {
+      emitPacket('server', 'memory', 'lookup', 'memory retrieval');
+      logMemoryEvent(`lookup requested for "${text.slice(0, 42)}${text.length > 42 ? '…' : ''}"`);
+    }
+
+    addTyping();
+
+    let responseText = '';
+    try {
+      const messages = [
+        { role: 'system', content: CHAT_SYSTEM_PROMPT },
+        ...chatHistory,
+      ];
+      const r = await fetch('/api/completion', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-ID': chatSessionId },
+        body: JSON.stringify({
+          prompt: text,
+          messages,
+          session_id: chatSessionId,
+          attachments: pendingAttachments.map(att => ({
+            name: att.name,
+            type: att.type,
+            content: att.content,
+            truncated: !!att.truncated,
+          })),
+        }), signal: AbortSignal.timeout(180000)
+      });
+      const data = await r.json().catch(() => ({}));
+      responseText = data.response || data.text || data.content || '';
+    } catch (e) {
+      responseText = '';
+    }
+
+    if (needsMemory) {
+      emitPacket('memory', 'server', 'rebound', 'memory payload');
+      logMemoryEvent('memory rebound returned to model server');
+    }
+
+    emitPacket('server', 'chat', 'response', 'assistant reply');
+    clearTyping();
+    state.responseCounter += 1;
+
+    if (!responseText) {
+      responseText = needsMemory
+        ? 'I traced a memory lookup and rebound through the model path. Backend response was unavailable, so this is the visual fallback reply.'
+        : 'The model path completed, but the backend did not return content. Visual packet flow is still active.';
+    }
+    addMsg('assistant', responseText);
+    _pushChatHistory('assistant', responseText);
+    pendingAttachments = [];
+    renderAttachmentList();
+    state.metrics.queue = Math.max(0, state.metrics.queue - 1);
+    document.getElementById('mini-queue').textContent = state.metrics.queue;
+  }
+  window.sendMessage = sendMessage;
+  window.renderCurrentState = () => renderStateMode('current');
+  window.renderPreviousState = () => renderStateMode('previous');
+  window.clearChat = () => {
+    messagesEl.innerHTML = '';
+    _resetChatHistory();
+    pendingAttachments = [];
+    renderAttachmentList();
+    addSystemMessage('Chat cleared. Constellation packet tracing remains active.');
+  };
+  chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } setTimeout(autoSize, 0); });
+  chatInput.maxLength = CHAT_INPUT_MAX_CHARS;
+  chatInput.addEventListener('input', () => clipChatInput({ notify: false, origin: 'input' }));
+  chatInput.addEventListener('paste', handleChatPaste);
+  chatAttachBtn?.addEventListener('click', () => chatAttachInput?.click());
+  chatAttachInput?.addEventListener('change', async e => {
+    await addAttachmentFiles(e.target.files);
+    chatAttachInput.value = '';
+  });
+  chatInput.addEventListener('dragover', e => {
+    e.preventDefault();
+    chatInputBar?.classList.add('drag-over');
+  });
+  chatInput.addEventListener('dragleave', () => chatInputBar?.classList.remove('drag-over'));
+  chatInput.addEventListener('drop', async e => {
+    e.preventDefault();
+    chatInputBar?.classList.remove('drag-over');
+    await addAttachmentFiles(e.dataTransfer?.files || []);
+  });
+  function autoSize() { chatInput.style.height = 'auto'; chatInput.style.height = Math.min(110, chatInput.scrollHeight) + 'px'; }
+
+  resizeStateRenderer();
+  addEventListener('resize', resizeStateRenderer);
+
+  async function checkHealth() {
+    const dot = document.getElementById('global-status-dot');
+    const txt = document.getElementById('global-status-text');
+    const banner = document.getElementById('health-banner');
+    const healthText = document.getElementById('health-text');
+    try {
+      const start = performance.now();
+      const r = await fetch('/api/health', { signal: AbortSignal.timeout(4000) });
+      const latency = Math.max(1, Math.round(performance.now() - start));
+      const data = await r.json().catch(() => ({}));
+      state.metrics.latency = data.latency_ms ?? latency;
+      state.metrics.model = data.model || state.metrics.model || 'ready';
+      state.metrics.context = data.context_tokens ?? state.metrics.context;
+      if (data.queue_depth !== undefined) state.metrics.queue = data.queue_depth;
+      banner.className = 'ok'; dot.className = 'status-dot online'; txt.textContent = 'Online';
+      healthText.textContent = data.message || 'All systems nominal';
+      if (data.uptime) state.metrics.uptime = data.uptime;
+    } catch (e) {
+      banner.className = 'warning'; dot.className = 'status-dot warning'; txt.textContent = 'Degraded';
+      healthText.textContent = 'Backend unreachable — running local visual telemetry';
+      state.metrics.latency = Math.max(8, state.metrics.latency + (Math.random() * 8 - 4));
+    }
+    renderMetrics();
+  }
+
+  function tickUptime() {
+    const val = state.metrics.uptime;
+    if (!/^\d\d:\d\d:\d\d$/.test(val)) return;
+    const [h,m,s] = val.split(':').map(Number);
+    const next = h*3600 + m*60 + s + 1;
+    const hh = String(Math.floor(next/3600)).padStart(2,'0');
+    const mm = String(Math.floor((next%3600)/60)).padStart(2,'0');
+    const ss = String(next%60).padStart(2,'0');
+    state.metrics.uptime = `${hh}:${mm}:${ss}`;
+    renderMetrics();
+  }
+
+  function renderMetrics() {
+    document.getElementById('metric-latency').textContent = Math.round(state.metrics.latency);
+    document.getElementById('metric-uptime').textContent = state.metrics.uptime;
+    document.getElementById('metric-model').textContent = state.metrics.model || 'idle';
+    document.getElementById('mini-context').textContent = state.metrics.context || 0;
+    document.getElementById('mini-queue').textContent = state.metrics.queue || 0;
+  }
+
+  async function loadModels() {
+    const sel = document.getElementById('model-select');
+    try {
+      const r = await fetch('/api/models');
+      const data = await r.json();
+      const models = data.models || [];
+      sel.innerHTML = '';
+      models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id || m.name || m; opt.textContent = m.name || m.id || m; sel.appendChild(opt);
+      });
+      if (!models.length) throw new Error('none');
+      const active = data.active || models[0].id || models[0].name || models[0];
+      sel.value = active;
+      state.metrics.model = active;
+    } catch {
+      sel.innerHTML = '<option value="mykro-core">mykro-core</option><option value="household-chat">household-chat</option>';
+      state.metrics.model = 'mykro-core';
+    }
+    renderMetrics();
+  }
+  loadModels();
+
+  async function loadMemories() {
+    try {
+      const r = await fetch('/api/memories');
+      const data = await r.json();
+      state.memories = data.memories || data.items || [];
+    } catch {
+      state.memories = ['Household preferences', 'UI constellation state', 'Recent model selection', 'Doctor route status'];
+    }
+    renderMemories();
+  }
+  window.loadMemories = loadMemories;
+  window.clearMemories = async () => {
+    try {
+      const listResp = await fetch('/api/memories', { signal: AbortSignal.timeout(6000) });
+      const data = await listResp.json().catch(() => ({}));
+      const items = Array.isArray(data.memories) ? data.memories : (Array.isArray(data.items) ? data.items : []);
+      if (items.length) {
+        const deletes = items
+          .map(item => item && (item.id || item.entry_id || item.key || item.memory_id))
+          .filter(Boolean)
+          .map(id => fetch(`/api/memories/${encodeURIComponent(String(id))}`, { method:'DELETE' }));
+        await Promise.all(deletes);
+      }
+      state.memories = [];
+      renderMemories();
+      logMemoryEvent('memory store cleared');
+      addSystemMessage('Memory Store clear completed.');
+    } catch (err) {
+      addSystemMessage(`Memory Store clear failed: ${err.message || err}`);
+    }
+  };
+
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+
+  function shortServiceDetail(service) {
+    if (!service) return 'Unavailable';
+    if (service.url && service.port) return `${service.url} · port ${service.port}`;
+    if (service.url) return service.url;
+    return String(service.detail || service.status || 'Unavailable');
+  }
+
+  function updateServiceCard(prefix, service) {
+    const status = String(service?.status || 'offline');
+    setText(`${prefix}-status`, status);
+    setText(`${prefix}-detail`, shortServiceDetail(service));
+  }
+
+  function renderStopObservability(obs) {
+    const box = document.getElementById('stop-observability-box');
+    if (!box) return;
+    if (!obs || !obs.last_action) {
+      box.textContent = 'No stop actions recorded yet.';
+      return;
+    }
+    const probe = obs.post_stop_port_probe || {};
+    const probeRows = Object.entries(probe);
+    const probeSummary = probeRows.length
+      ? probeRows.map(([port, open]) => `${port}:${open ? 'open' : 'closed'}`).join(', ')
+      : 'n/a';
+    const unmanaged = Array.isArray(obs.unmanaged_pids) && obs.unmanaged_pids.length
+      ? obs.unmanaged_pids.join(', ')
+      : 'none';
+    const when = obs.timestamp || 'unknown';
+    const listenerState = obs.listener_confirmed_gone ? 'confirmed gone' : 'listener still present';
+    const lines = [
+      `Last stop action: ${obs.last_action}`,
+      `When: ${when}`,
+      `Status: ${obs.status || 'unknown'}`,
+      `Service path: ${obs.service_path || 'unknown'}`,
+      `Unmanaged PIDs terminated: ${unmanaged}`,
+      `Post-stop probe: ${listenerState}`,
+      `Port map: ${probeSummary}`,
+    ];
+    box.textContent = lines.join('\n');
+  }
+
+  async function refreshServiceStatus() {
+    try {
+      const r = await fetch('/api/services/status', { signal: AbortSignal.timeout(6000) });
+      const data = await r.json();
+      const services = data.services || {};
+      updateServiceCard('service-gateway', services.gateway);
+      updateServiceCard('service-household', services.household);
+      updateServiceCard('service-webui', services.web_ui);
+
+      const modelStatus = services.model_server || { status:'offline', detail:'No llama-server detected.' };
+      setText('service-model-status', modelStatus.status || 'offline');
+      setText('service-model-detail', modelStatus.detail || 'No llama-server detected.');
+
+      setText('website-webui-status', services.web_ui?.status || 'online');
+      setText('website-household-status', services.household?.status || 'offline');
+      setText('website-panel-note', `Gateway: ${services.gateway?.status || 'offline'} · Household: ${services.household?.status || 'offline'} · Model: ${modelStatus.status || 'offline'}`);
+      setText('automation-note', `Gateway ${services.gateway?.status || 'offline'} · Household ${services.household?.status || 'offline'} · Model ${modelStatus.status || 'offline'}`);
+      renderStopObservability(data.stop_observability || {});
+    } catch (err) {
+      addSystemMessage(`Service refresh failed: ${err.message || err}`);
+    }
+  }
+  window.refreshServiceStatus = refreshServiceStatus;
+
+  async function controlService(service, action) {
+    try {
+      emitPacket('webui', service, 'control', `${action} ${service}`);
+      const r = await fetch(`/api/services/${encodeURIComponent(service)}/${encodeURIComponent(action)}`, { method:'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok && r.status !== 202 && r.status !== 200 && r.status !== 409) {
+        throw new Error(data.error || `status ${r.status}`);
+      }
+      addSystemMessage(`${service} ${action}: ${data.status || r.status}`);
+      await refreshServiceStatus();
+      if (service === 'gateway') {
+        await loadWiring();
+        await refreshDoctorPanel();
+      }
+    } catch (err) {
+      addSystemMessage(`${service} ${action} failed: ${err.message || err}`);
+    }
+  }
+  window.controlService = controlService;
+
+  window.openCurrentNeuralUi = () => {
+    const query = chatSessionId ? `?session_id=${encodeURIComponent(chatSessionId)}` : '';
+    window.open(`/${query}`, '_blank', 'noopener');
+  };
+  window.openClassicUi = () => window.open('/?classic=1', '_blank', 'noopener');
+  window.openStateRenderer = () => {
+    const query = chatSessionId ? `?session_id=${encodeURIComponent(chatSessionId)}` : '';
+    window.open(`/state-renderer${query}`, '_blank', 'noopener');
+  };
+  window.openNodeDeployPage = () => window.open('/deploy/node', '_blank', 'noopener');
+  window.openHouseholdUi = async () => {
+    try {
+      const r = await fetch('/api/services/status', { signal: AbortSignal.timeout(6000) });
+      const data = await r.json();
+      const household = data.services?.household;
+      if (!household?.reachable && household?.status !== 'online') {
+        throw new Error('Household service is offline. Start it first.');
+      }
+      window.open(household.url || 'http://127.0.0.1:5001', '_blank', 'noopener');
+    } catch (err) {
+      addSystemMessage(`Open Household failed: ${err.message || err}`);
+    }
+  };
+  window.startHouseholdFromWebsite = async () => controlService('household', 'start');
+
+  async function refreshDoctorPanel() {
+    const box = document.getElementById('doctor-summary');
+    try {
+      const [doctorResp, wiringResp] = await Promise.all([
+        fetch('/api/doctor-panel', { signal: AbortSignal.timeout(8000) }),
+        fetch('/api/wiring', { signal: AbortSignal.timeout(8000) }),
+      ]);
+      const doctorData = await doctorResp.json().catch(() => ({}));
+      const wiringData = await wiringResp.json().catch(() => ({}));
+      const lines = [];
+      const summary = doctorData.summary || doctorData.message || doctorData.status || 'No doctor summary available.';
+      lines.push(`Doctor: ${summary}`);
+      if (doctorData.gateway) lines.push(`Gateway: ${JSON.stringify(doctorData.gateway)}`);
+      if (doctorData.models) lines.push(`Models: ${JSON.stringify(doctorData.models)}`);
+      const routeCount = Array.isArray(wiringData.routes) ? wiringData.routes.length : (Array.isArray(wiringData.wiring) ? wiringData.wiring.length : 0);
+      lines.push(`Wiring routes visible: ${routeCount}`);
+      box.textContent = lines.join('\n');
+    } catch (err) {
+      box.textContent = `Doctor refresh failed: ${err.message || err}`;
+    }
+  }
+  window.refreshDoctorPanel = refreshDoctorPanel;
+
+  function renderMemories() {
+    const q = (memoryFilter?.value || '').toLowerCase();
+    const list = document.getElementById('memory-chips');
+    const filtered = state.memories.filter(m => String(typeof m === 'string' ? m : (m.key || m.id || m.text || 'memory')).toLowerCase().includes(q));
+    list.innerHTML = filtered.length ? filtered.map(m => {
+      const label = typeof m === 'string' ? m : (m.key || m.id || m.text || 'Memory');
+      return `<span class="memory-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>${label}</span>`;
+    }).join('') : '<span class="memory-chip">No matching memories</span>';
+  }
+  memoryFilter?.addEventListener('input', renderMemories);
+  loadMemories();
+
+  async function loadWiring() {
+    let routes = [];
+    try {
+      const r = await fetch('/api/wiring');
+      const data = await r.json();
+      routes = data.routes || data.wiring || [];
+    } catch {}
+    if (!routes.length) routes = [
+      { route:'/api/health', method:'GET', status:'ok' },
+      { route:'/api/completion', method:'POST', status:'ok' },
+      { route:'/api/memories', method:'GET', status:'ok' },
+      { route:'/api/models', method:'GET', status:'ok' },
+      { route:'/api/start', method:'POST', status:'idle' },
+      { route:'/api/stop', method:'POST', status:'idle' },
+      { route:'/api/start (reload)', method:'POST', status:'idle' },
+      { route:'/api/emergency_stop', method:'POST', status:'idle' }
+    ];
+    const tbody = document.getElementById('wiring-tbody');
+    tbody.innerHTML = routes.map(row => {
+      const st = row.status || 'idle';
+      const cls = st === 'ok' ? 'badge-ok' : st === 'warn' ? 'badge-warn' : st === 'error' ? 'badge-err' : 'badge-idle';
+      return `<tr><td style="color:var(--color-text)">${row.route || row.path || row.name}</td><td>${row.method || 'GET'}</td><td><span class="badge ${cls}">${st}</span></td></tr>`;
+    }).join('');
+  }
+  loadWiring();
+  refreshDoctorPanel();
+  refreshServiceStatus();
+
+  window.startModel = async () => {
+    const model = document.getElementById('model-select').value;
+    state.metrics.model = model; state.metrics.queue = 1; renderMetrics(); emitPacket('webui', 'server', 'control', 'start model');
+    try {
+      const r = await fetch('/api/model/start', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model }) });
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      addSystemMessage(`Model start requested for ${model}.`);
+    } catch (err) {
+      addSystemMessage(`Model start failed: ${err.message || err}`);
+    }
+    checkHealth();
+  };
+  window.stopModel = async () => {
+    emitPacket('webui', 'server', 'control', 'stop model');
+    try {
+      const r = await fetch('/api/model/stop', { method:'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      addSystemMessage(`Model stop: ${data.status || 'requested'}.`);
+    } catch (err) {
+      addSystemMessage(`Model stop failed: ${err.message || err}`);
+    }
+    await refreshServiceStatus();
+    state.metrics.model = 'stopped'; renderMetrics();
+  };
+  window.reloadModel = async () => {
+    emitPacket('webui', 'server', 'control', 'reload model');
+    try {
+      const model = document.getElementById('model-select').value;
+      const r = await fetch('/api/model/reload', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model }) });
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      addSystemMessage(`Model reload requested for ${model}.`);
+    } catch (err) {
+      addSystemMessage(`Model reload failed: ${err.message || err}`);
+    }
+    checkHealth();
+  };
+  window.emergencyStop = async () => {
+    if (!confirm('Emergency stop all processes?')) return;
+    emitPacket('webui', 'server', 'estop', 'emergency stop');
+    try {
+      const r = await fetch('/api/emergency_stop', { method:'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      const g = data.gateway_service?.status || data.gateway?.status || 'unknown';
+      const h = data.household_service?.status || 'unknown';
+      const m = data.model_server?.status || data.model_server || 'unknown';
+      addSystemMessage(`Emergency stop executed (gateway=${g}, household=${h}, model=${m}).`);
+    } catch (err) {
+      addSystemMessage(`Emergency stop failed: ${err.message || err}`);
+    }
+    await refreshServiceStatus();
+    document.getElementById('health-banner').className = 'error';
+    document.getElementById('health-text').textContent = 'Emergency stop executed';
+  };
+
+  setInterval(checkHealth, 30000); checkHealth();
+  setInterval(tickUptime, 1000);
+  setInterval(() => {
+    if (document.getElementById('toggle-metrics')?.checked) {
+      state.metrics.latency = Math.max(5, state.metrics.latency + (Math.random()*6 - 3));
+      renderMetrics();
+    }
+  }, 2000);
+
+  addSystemMessage('Click any constellation node to expand into a detailed subsystem view, then use Back to collapse to the node.');
+  emitPacket('webui', 'server', 'boot', 'ui initialized');
+})();
+</script>
+</body>
+</html>

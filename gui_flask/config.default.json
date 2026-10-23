@@ -1,0 +1,52 @@
+{
+  "model": {
+    "endpoint": "",
+    "type": "",
+    "backend": "",
+    "model_name": "",
+    "model_path": "",
+    "default_server": ""
+  },
+  "servers": [],
+  "startup": {
+    "server_mode": "off",
+    "auto_start_web_ui": false,
+    "auto_start_household": false,
+    "autoconfig_on_launch": false,
+    "autofix_gateway_deps": false,
+    "rewrite_invalid_config": false,
+    "household_port": 5001
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "agent_max_iterations": 25,
+    "auto_approve_reads": true
+  },
+  "settings": {
+    "self_think": true,
+    "show_self_thought": true,
+    "three_turn": true,
+    "context_fraction": 0.6,
+    "n_predict": 1024,
+    "temperature": 0.4,
+    "top_p": 0.9,
+    "repeat_penalty": 1.1,
+    "timeout_secs": 180
+  },
+  "setup": {
+    "completed": false,
+    "use_external_backend": false,
+    "requires_cloud_api_key": false,
+    "backend": ""
+  },
+  "ui": {
+    "animation_fps": 24,
+    "low_power": false
+  },
+  "safety": {
+    "damage_threshold": 100.0,
+    "warning_threshold": 70.0,
+    "temp_poll_interval_ms": 5000
+  }
+}

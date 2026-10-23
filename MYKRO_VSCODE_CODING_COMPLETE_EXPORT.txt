@@ -1,0 +1,1843 @@
+================================================================================
+                      MYKRO VS CODE CODING INTEGRATION
+                       Complete File Contents Export
+                            Generated 2026-08-18
+================================================================================
+
+
+SECTION 1: ARCHITECTURE & DOCUMENTATION
+================================================================================
+
+## FILE: MYKRO_COPILOT_WIRING.md
+## LOCATION: the repository root\MYKRO_COPILOT_WIRING.md
+
+# MYKRO ↔ VS Code Copilot Wiring Architecture
+
+## Overview
+
+This document describes the complete wiring that makes MYKRO act as a full 
+replacement for GitHub Copilot in VS Code.
+
+**Goal:** One-click setup where users open VS Code and MYKRO provides chat, 
+autocomplete, and autonomous coding—all locally.
+
+---
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            VS CODE EDITOR                                   │
+├──────────┬──────────────┬──────────────┬──────────────────────────────────┤
+│  @mykro  │ Chat Panel   │ Inline Code  │  Diagnostics & Commands         │
+│ Participant│            │ Completions  │  (Fix, Review, Plan)            │
+└──────────┼──────────────┼──────────────┴──────────────────────────────────┘
+           │              │
+           └──────────────┴─── VS CODE LANGUAGE MODEL API ──────────────┐
+                                                                        │
+                    ┌────────────────────────────────────────────────────┘
+                    │
+                    ▼
+    ┌───────────────────────────────────────────────┐
+    │    MYKRO VS Code Extension (vscode-extension) │
+    ├────────────────┬────────────────┬─────────────┤
+    │ MykroLanguage  │ Chat           │ Inline      │
+    │ ModelProvider  │ Participant    │ Completion  │
+    │ (LM API impl)  │ Handler        │ Provider    │
+    └────────┬───────┴────────┬───────┴──────┬──────┘
+             │                │              │
+             │                └──────────────┴─── Unified Gateway Client ──┐
+             │                                                             │
+             └─────────────────────────────────────────────────────────────┤
+                                                                           │
+    ┌──────────────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                     MYKRO GATEWAY (FastAPI)                                │
+│                      Port: 8090 (localhost)                                │
+├──────────────────┬──────────────────┬──────────────┬──────────────────────┤
+│ /v1/chat/        │ /v1/models       │ /v1/memories │ /health              │
+│ completions      │ /v1/completions  │ /v1/tools    │ /metrics             │
+│ (streaming)      │ (FIM)            │              │ /hub/status          │
+└────────┬─────────┴────────┬─────────┴──────────────┴──────────────────────┘
+         │                  │
+         ├──────────────────┴───────────────────────────────┐
+         │                                                   │
+    ┌────▼─────────┐  ┌────────────────┐  ┌──────────────┐ │
+    │ Model Router │  │ Context Mgr    │  │ Memory Store │ │
+    │ (complexity) │  │ (workspace     │  │ (ranking,    │ │
+    │              │  │  indexing,     │  │  retrieval)  │ │
+    │              │  │  token budgeting)│  │             │ │
+    └────┬─────────┘  └────────────────┘  └──────────────┘ │
+         │                                                   │
+    ┌────┴──────────────────────┬────────────────────────┐  │
+    │                            │                        │  │
+    ▼                            ▼                        ▼  ▼
+┌──────────────┐          ┌──────────────┐        ┌──────────────┐
+│ llama-server │          │ llama-server │        │ llama-server │
+│ (Small)      │          │ (Large)      │        │ (Mega)       │
+│ Port: 8081   │          │ Port: 8080   │        │ Port: 8082   │
+│ Qwen 1.5B    │          │ Qwen 7B      │        │ Mixtral 141B │
+└──────────────┘          └──────────────┘        └──────────────┘
+```
+
+---
+
+## Wiring Contract
+
+### 1. VS Code → Extension
+
+**Trigger:** User opens VS Code
+
+**Handler:** `extension.ts:activate()`
+
+**Actions:**
+- Read config from `vscode.workspace.getConfiguration('mykro')`
+- Initialize `GatewayClient` pointing to `http://127.0.0.1:8090`
+- Register `MykroLanguageModelProvider` as vendor `'mykro'`
+- Register `MykroInlineCompletionProvider` for all file types
+- Create `@mykro.copilot` chat participant
+- Set up `BackendManager` for auto-startup
+
+**Config Used:**
+```json
+{
+  "mykro.gatewayUrl": "http://127.0.0.1:8090",
+  "mykro.defaultModel": "mykro-auto",
+  "mykro.autoStartBackendOnPrompt": true,
+  "mykro.inlineCompletionsEnabled": true
+}
+```
+
+---
+
+### 2. Extension → Gateway (Chat Completions)
+
+**Trigger:** User sends `@mykro your question` or uses chat model selector
+
+**Flow:**
+1. **Chat Request Incoming**
+   - `vscode.ChatRequest` received by `handleChatRequest()`
+   - Command parsed: `plan`, `agent`, `review`, `fix`, or default (`agent`)
+   - Workspace root resolved from active editor
+
+2. **Backend Readiness Check**
+   - `BackendManager.ensureReady()` called
+   - Checks `/health` endpoint
+   - If unhealthy and `autoStartBackendOnPrompt=true`:
+     - Finds `start-all.ps1` in workspace
+     - Spawns PowerShell process to launch gateway + models
+     - Waits up to 120s for gateway to be healthy
+     - Waits up to 60s for target model to be ready
+
+3. **Message Preparation**
+   - Request message converted to `ChatMessage[]`
+   - Workspace root injected as context
+   - Active file content appended (if referenced)
+   - Diagnostic information collected (for `fix` command)
+
+4. **Streaming Request to Gateway**
+   - POST to `http://127.0.0.1:8090/v1/chat/completions`
+   - Payload:
+     ```json
+     {
+       "model": "mykro-auto",
+       "messages": [...],
+       "stream": true,
+       "mode": "agent",
+       "temperature": 0.7,
+       "max_tokens": 4096,
+       "workspace_root": "/path/to/workspace"
+     }
+     ```
+   - Response: Server-Sent Events (SSE) stream
+   - Each chunk yielded to `vscode.Progress`
+
+5. **Fallback to Sync**
+   - If streaming fails, falls back to sync POST
+   - Single response returned in full
+
+**Error Handling:**
+- If gateway is offline and auto-start is disabled → error message shown
+- If auto-start times out → user prompted to start manually
+- Cancellation token respected throughout
+
+---
+
+### 3. Extension → Gateway (Inline Completions / FIM)
+
+**Trigger:** User types in editor (when `mykro.inlineCompletionsEnabled=true`)
+
+**Flow:**
+1. **Code Context Capture**
+   - Prefix: previous ~60 lines + current line up to cursor
+   - Suffix: current line after cursor + next ~10 lines
+   - Debounce: 400ms (configurable)
+
+2. **FIM Request to Gateway**
+   - POST to `http://127.0.0.1:8090/v1/completions`
+   - Payload:
+     ```json
+     {
+       "model": "mykro-auto",
+       "prompt": "<prefix>",
+       "suffix": "<suffix>",
+       "max_tokens": 128,
+       "temperature": 0.2
+     }
+     ```
+
+3. **Inline Insertion**
+   - Response text inserted into editor
+   - User can accept/reject with TAB or ESC
+
+---
+
+### 4. Gateway → Model Router
+
+**Trigger:** Gateway receives chat/completion request
+
+**Router Logic (in `model_router.py`):**
+
+1. **Complexity Estimation**
+   - Analyze request prompt + system prompt
+   - If simple (e.g., "fix typo", FIM) → use `mykro-small` (8081)
+   - If complex (e.g., "refactor entire module") → use `mykro-large` (8080)
+   - If user explicitly selects → honor user choice
+
+2. **Endpoint Selection**
+   - `mykro-auto` → router decides
+   - `mykro-large` → always 8080
+   - `mykro-small` → always 8081
+   - `mykro-mega` → always 8082 (if available)
+
+3. **Forward to Model Server**
+   - HTTP POST to selected `llama-server` instance
+   - Stream responses back to caller
+
+---
+
+### 5. Gateway → Memory & Context Management
+
+**On Each Request:**
+
+1. **Memory Retrieval**
+   - Query `memory_store.py` for relevant memories
+   - Rank by keyword overlap + recency
+   - Inject up to 1000 chars into system prompt
+
+2. **Context Budgeting**
+   - Estimate tokens for conversation history
+   - If exceeds budget → trim older messages (keep recent + important)
+   - Inject workspace index: file types, key functions, READMEs
+
+3. **Tool Registration**
+   - Inject tool descriptions from `tools/` registry
+   - Tool names: `read_file`, `write_file`, `execute_command`, `git_status`, etc.
+
+---
+
+### 6. Autonomous Agent (Optional)
+
+**Trigger:** `mykro.autonomousAgentEnabled=true` + workspace idle for 5+ min
+
+**Flow:**
+1. `IdleWatcher` detects inactivity
+2. `AutonomousSession.start()` invoked
+3. Repeatedly calls gateway with `mode: "autonomous"`
+4. Agent proposes changes → auto-commits to git
+5. User reviews via `git diff`
+6. Pauses when user returns to keyboard
+
+---
+
+## Configuration
+
+### VS Code Settings (`settings.json`)
+
+```json
+{
+  "mykro.gatewayUrl": "http://127.0.0.1:8090",
+  "mykro.defaultModel": "mykro-auto",
+  "mykro.defaultMode": "agent",
+  "mykro.autoStartBackendOnPrompt": true,
+  "mykro.idleShutdownMinutes": 6,
+  "mykro.inlineCompletionsEnabled": true,
+  "mykro.inlineCompletionDebounceMs": 400,
+  "mykro.autonomousAgentEnabled": false,
+  "mykro.idleThresholdMinutes": 5,
+  "mykro.autonomousSessionMinutes": 30
+}
+```
+
+### MYKRO Config (`gui_flask/config.json`)
+
+**Relevant sections:**
+
+```json
+{
+  "servers": [
+    { "name": "MYKRO Small", "exe": "...", "args": [..., "--port", "8081", ...] },
+    { "name": "MYKRO Large", "exe": "...", "args": [..., "--port", "8080", ...] },
+    { "name": "MYKRO Mega", "exe": "...", "args": [..., "--port", "8082", ...] },
+    { "name": "MYKRO Gateway", "exe": ".venv\\Scripts\\python.exe", "args": ["gateway.py"], "cwd": "gui_flask" }
+  ],
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "large_model": { "name": "mykro-large", "endpoint": "http://127.0.0.1:8080" },
+    "small_model": { "name": "mykro-small", "endpoint": "http://127.0.0.1:8081" },
+    "mega_model": { "name": "mykro-mega", "endpoint": "http://127.0.0.1:8082" }
+  }
+}
+```
+
+---
+
+## Startup Sequence
+
+### Manual Startup
+
+1. **Terminal:**
+   ```powershell
+   cd the repository root\gui_flask
+   .\start-all.ps1
+   ```
+   This launches:
+   - MYKRO Small (llama-server on 8081)
+   - MYKRO Large (llama-server on 8080)
+   - MYKRO Gateway (FastAPI on 8090)
+
+2. **VS Code:**
+   - Open workspace folder
+   - Extension activates automatically
+   - Chat participant `@mykro` ready
+
+
+================================================================================
+
+## FILE: MYKRO_COPILOT_README.md
+## LOCATION: the repository root\MYKRO_COPILOT_README.md
+
+# MYKRO Copilot Integration Guide
+
+## Quick Start (30 seconds)
+
+```powershell
+# 1. Start the backend
+cd gui_flask
+.\start-all.ps1
+
+# 2. In another terminal, run setup
+.\mykro-copilot-setup.ps1
+
+# 3. Open VS Code
+code .
+
+# 4. Chat with MYKRO
+# Cmd+I → @mykro what does this function do?
+```
+
+---
+
+## What is MYKRO Copilot?
+
+**MYKRO** is a local AI coding assistant that replaces GitHub Copilot with:
+
+- **Chat** — Ask questions about your code, get refactoring suggestions, generate code
+- **Inline Completions** — Get FIM (Fill-In-The-Middle) suggestions as you type
+- **Autonomous Agent** — Works during idle periods to improve your codebase
+- **Local Execution** — All models run on your machine (no cloud, no API keys)
+- **Multi-Model Routing** — Automatically selects small, large, or mega models based on task complexity
+
+---
+
+## Architecture
+
+```
+VS Code              Extension           Gateway            Models
+┌────────┐           ┌──────────┐       ┌──────────┐      ┌──────┐
+│ @mykro │ ────────► │ LM API   │ ────► │ Router   │ ───► │Small │
+│ Chat   │           │ Provider │       └──────────┘      └──────┘
+└────────┘           │          │              │
+                     │ Inline   │              ├────► Large Model
+                     │ Complete │              │
+                     │ Provider │              └────► Mega (Mixtral)
+                     └──────────┘
+```
+
+**Key Components:**
+
+1. **VS Code Extension** (vscode-extension/) — Provides chat participant, inline completions, and model selection
+2. **MYKRO Gateway** (gui_flask/gateway.py) — Routes requests to models, manages memory, tracks context
+3. **Model Servers** — Local llama-server instances running different Qwen and Mixtral models
+4. **Config** (gui_flask/config.json) — Defines servers, ports, and settings
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Windows 10/11 (Linux/Mac support coming)
+- VS Code ≥ 1.104.0
+- Python 3.10+
+- ~20GB free disk space (for models)
+- llama.cpp (installed via winget during setup)
+
+### Setup Steps
+
+1. **Verify you're in the mykro workspace:**
+   ```powershell
+   cd the repository root
+   ```
+
+2. **Install Python dependencies:**
+   ```powershell
+   cd gui_flask
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   cd ..
+   ```
+
+3. **Build VS Code extension:**
+   ```powershell
+   cd vscode-extension
+   npm install
+   npm run compile
+   npm run package
+   cd ..
+   ```
+
+4. **Start the backend:**
+   ```powershell
+   cd gui_flask
+   .\start-all.ps1
+   ```
+   This launches:
+   - MYKRO Small (Qwen 1.5B) on port 8081
+   - MYKRO Large (Qwen 7B) on port 8080
+   - MYKRO Gateway (FastAPI) on port 8090
+
+5. **Install extension in VS Code:**
+   - Cmd+Shift+X
+   - Search "Install from VSIX"
+   - Select `vscode-extension/mykro-copilot-0.1.0.vsix`
+
+6. **Verify setup:**
+   ```powershell
+   .\mykro-copilot-setup.ps1
+   ```
+
+---
+
+## Configuration
+
+### VS Code Settings
+
+Edit `.vscode/settings.json` or `Ctrl+,`:
+
+```json
+{
+  "mykro.gatewayUrl": "http://127.0.0.1:8090",
+  "mykro.defaultModel": "mykro-auto",
+  "mykro.defaultMode": "agent",
+  "mykro.autoStartBackendOnPrompt": true,
+  "mykro.idleShutdownMinutes": 6,
+  "mykro.inlineCompletionsEnabled": true,
+  "mykro.inlineCompletionDebounceMs": 400,
+  "mykro.autonomousAgentEnabled": false,
+  "mykro.idleThresholdMinutes": 5,
+  "mykro.autonomousSessionMinutes": 30
+}
+```
+
+**Key Settings:**
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `gatewayUrl` | `http://127.0.0.1:8090` | Where the gateway listens |
+| `defaultModel` | `mykro-auto` | Which model to use (auto, small, large, mega) |
+| `defaultMode` | `agent` | Chat mode (ask, agent, plan) |
+| `autoStartBackendOnPrompt` | `true` | Auto-launch backend if offline |
+| `inlineCompletionsEnabled` | `true` | Enable FIM suggestions |
+| `autonomousAgentEnabled` | `false` | Run agent during idle periods |
+
+### MYKRO Config
+
+Edit `gui_flask/config.json` to adjust:
+
+```json
+{
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "large_model": { "endpoint": "http://127.0.0.1:8080" },
+    "small_model": { "endpoint": "http://127.0.0.1:8081" }
+  },
+  "settings": {
+    "self_think": true,
+    "three_turn": true,
+    "temperature": 0.4,
+    "timeout_secs": 180
+  }
+}
+```
+
+---
+
+## Usage
+
+### Chat Commands
+
+In VS Code Chat panel (Cmd+I or Cmd+L):
+
+#### @mykro (Default: Agent Mode)
+```
+@mykro refactor this function to use async/await
+```
+- Auto-reads active file
+- Suggests changes (doesn't auto-apply)
+- Can implement with `/agent` command
+
+#### @mykro /plan
+```
+@mykro /plan add user authentication to the app
+```
+- Creates a plan without implementing
+- Safe for exploring options
+
+#### @mykro /agent
+```
+@mykro /agent implement the plan from earlier
+```
+- Can read/write files
+- Can run git commands
+- Implements changes directly
+
+#### @mykro /review
+```
+@mykro /review this file for bugs
+```
+
+
+================================================================================
+
+## FILE: MYKRO_COPILOT_INTEGRATION_CHECKLIST.md
+## LOCATION: the repository root\MYKRO_COPILOT_INTEGRATION_CHECKLIST.md
+
+# MYKRO Copilot Integration Checklist
+
+**Last Updated:** 2026-06-10  
+**Status:** ✅ Ready for Production
+
+---
+
+## Pre-Flight Checklist
+
+### System Requirements
+- [ ] Windows 10/11 (or Linux/Mac)
+- [ ] 20GB+ free disk space
+- [ ] VS Code ≥ 1.104.0
+- [ ] Python 3.10+
+- [ ] npm & Node.js 18+
+
+### Architecture Components
+- [ ] MYKRO Gateway (FastAPI on 8090)
+- [ ] MYKRO Small Model (llama-server on 8081)
+- [ ] MYKRO Large Model (llama-server on 8080)
+- [ ] MYKRO Mega Model (llama-server on 8082) — optional
+- [ ] VS Code Extension (mykro-copilot)
+
+---
+
+## Wiring Verification
+
+### 1. Gateway ↔ Port 8090 ✅
+- [x] Port configured in `gui_flask/config.json`
+- [x] FastAPI lifespan pattern for startup/shutdown
+- [x] Health endpoint: `/health`
+- [x] Chat completions endpoint: `/v1/chat/completions` (streaming)
+- [x] FIM endpoint: `/v1/completions`
+- [x] Models list endpoint: `/v1/models`
+- [x] Memory endpoints: `/v1/memories`
+
+**Verification:**
+```powershell
+curl http://127.0.0.1:8090/health
+# Expected: {"gateway": "ok", "models": {...}}
+```
+
+### 2. Models ↔ Gateway ✅
+- [x] Small model routes to 8081
+- [x] Large model routes to 8080
+- [x] Mega model routes to 8082
+- [x] Model router respects complexity estimation
+- [x] Fallback behavior defined
+
+**Verification:**
+```powershell
+curl http://127.0.0.1:8090/v1/models
+# Expected: [{"id": "mykro-auto"}, {"id": "mykro-large"}, ...]
+```
+
+### 3. Extension ↔ Gateway ✅
+- [x] GatewayClient initialized in extension.ts
+- [x] Gateway URL from config: `mykro.gatewayUrl`
+- [x] Default URL: `http://127.0.0.1:8090`
+- [x] Retry logic with exponential backoff (2 retries)
+- [x] Health checks every 30 seconds
+
+**Verification:**
+```typescript
+const client = new GatewayClient("http://127.0.0.1:8090");
+await client.health();
+// Expected: HealthResponse with "ok" status
+```
+
+### 4. VS Code ↔ Extension ✅
+- [x] Language Model Chat Provider registered
+- [x] Chat Participant registered (`@mykro`)
+- [x] Inline Completion Provider registered
+- [x] Extension activates on startup
+
+**Verification:**
+```
+Cmd+I → @mykro test
+# Should invoke MykroLanguageModelProvider
+```
+
+### 5. Backend Auto-Startup ✅
+- [x] BackendManager.ensureReady() checks health
+- [x] If offline + autoStartBackendOnPrompt=true → launches start-all.ps1
+- [x] Waits for gateway (120s timeout)
+- [x] Waits for model (60s timeout)
+- [x] Idle shutdown timer (configurable, default 6 min)
+
+**Verification:**
+```json
+{
+  "mykro.autoStartBackendOnPrompt": true,
+  "mykro.idleShutdownMinutes": 6
+}
+```
+
+---
+
+## Configuration Verification
+
+### VS Code Settings ✅
+- [x] Settings schema defined in `package.json`
+- [x] Default values set
+- [x] Configuration target: Global + Workspace
+- [x] Settings watchers for dynamic updates
+
+**File:** `vscode-extension/package.json:configuration.properties`
+
+### MYKRO Config ✅
+- [x] Server definitions in `gui_flask/config.json`
+- [x] Model endpoints configured
+- [x] Gateway host/port configured
+- [x] Tool registry enabled
+- [x] Memory settings configured
+
+**File:** `gui_flask/config.json`
+
+---
+
+## Feature Verification
+
+### Chat Participant ✅
+- [x] `@mykro` participant created
+- [x] Commands implemented:
+  - [x] `/plan` (planning mode)
+  - [x] `/agent` (agent mode with file operations)
+  - [x] `/review` (code review mode)
+  - [x] `/fix` (fix diagnostics mode)
+  - [x] `/autonomous` (manual autonomous trigger)
+- [x] Default mode configurable
+- [x] Message history trimmed appropriately
+
+**Handler:** `extension.ts:handleChatRequest()`
+
+### Language Model Provider ✅
+- [x] Implements `vscode.LanguageModelChatProvider`
+- [x] Provides model information
+- [x] Streams chat completions via SSE
+- [x] Falls back to sync if streaming fails
+- [x] Token counting implemented
+- [x] Cancellation token respected
+
+**Handler:** `extension.ts:MykroLanguageModelProvider`
+
+### Inline Completion Provider ✅
+- [x] Implements `vscode.InlineCompletionItemProvider`
+- [x] Fill-In-The-Middle (FIM) support
+- [x] Debounce implemented (default 400ms)
+- [x] Context window: 60 lines before + 10 after
+- [x] Respects editor position
+
+
+================================================================================
+
+SECTION 2: EXTENSION SOURCE CODE
+================================================================================
+
+## FILE: vscode-extension/src/extension.ts (EXCERPT)
+## LOCATION: the repository root\vscode-extension\src\extension.ts
+
+/**
+ * MYKRO VS Code Extension — Entry point
+ *
+ * Registers a Chat Participant (@mykro) that routes requests through
+ * the local MYKRO Gateway API, providing Ask, Agent, and Plan modes.
+ *
+ * Usage in VS Code Chat:
+ *   @mykro what does this function do?          (Ask mode)
+ *   @mykro /agent refactor the auth module      (Agent mode)
+ *   @mykro /plan add user authentication        (Plan mode)
+ */
+import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import { spawn } from 'child_process';
+import { execSync } from 'child_process';
+import { GatewayClient } from './gatewayClient';
+import { IdleWatcher } from './idleWatcher';
+import { AutonomousSession } from './autonomousSession';
+import { MykroLogger } from './logger';
+import type { ChatMessage, HealthResponse } from './types';
+
+let client: GatewayClient;
+let backendManager: BackendManager;
+let outputChannel: vscode.OutputChannel;
+let logger: MykroLogger;
+let idleWatcher: IdleWatcher;
+let autonomousSession: AutonomousSession;
+let extensionContext: vscode.ExtensionContext | undefined;
+
+async function appendDebugLog(filename: string, text: string): Promise<void> {
+    try {
+        const baseUri = extensionContext?.globalStorageUri ?? 
+                        vscode.workspace.workspaceFolders?.[0]?.uri;
+        if (!baseUri) { return; }
+        const dir = baseUri.fsPath;
+        await fs.promises.mkdir(dir, { recursive: true });
+        const filePath = path.join(dir, filename);
+        const entry = `[${new Date().toISOString()}] ${text}\n`;
+        await fs.promises.appendFile(filePath, entry, { encoding: 'utf8' });
+    } catch {
+        // best-effort only
+    }
+}
+
+function stringifyUnknown(value: unknown): string {
+    if (value instanceof Error) {
+        return value.message;
+    }
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (value === undefined) {
+        return '';
+    }
+    try {
+        const json = JSON.stringify(value, null, 2);
+        if (json && json !== '{}') {
+            return json;
+        }
+    } catch {
+        // Fall back below.
+    }
+    const text = String(value);
+    return text === '[object Object]' ? 'Unknown object value' : text;
+}
+
+function extractChatResponseText(part: vscode.ChatResponsePart): string {
+    if (part instanceof vscode.ChatResponseMarkdownPart) {
+        return part.value.value;
+    }
+
+    const maybePart = part as unknown as { value?: unknown };
+    const value = maybePart.value;
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (value && typeof value === 'object' && 'value' in value) {
+        const nested = (value as { value?: unknown }).value;
+        if (typeof nested === 'string') {
+            return nested;
+        }
+    }
+
+    return '';
+}
+
+class BackendManager {
+    private idleTimer: NodeJS.Timeout | undefined;
+    private activeRequests = 0;
+    private autoStarted = false;
+    private startPromise: Promise<void> | null = null;
+
+    constructor(
+        private readonly gatewayClient: GatewayClient,
+        private readonly extensionRoot: string,
+    ) {}
+
+    private get autoStartEnabled(): boolean {
+        return vscode.workspace.getConfiguration('mykro')
+            .get<boolean>('autoStartBackendOnPrompt', true);
+    }
+}
+
+---
+
+## FILE: vscode-extension/src/autonomousSession.ts (EXCERPT)
+## LOCATION: the repository root\vscode-extension\src\autonomousSession.ts
+
+/**
+ * AutonomousSession — Orchestrates a time-boxed autonomous coding session.
+ *
+ * Iterates through WorkItems discovered by GoalDiscovery, sends each to the
+ * MYKRO gateway for planning + fixing, then streams results into VS Code chat
+ * with Keep / Discard follow-up buttons.
+ *
+ * The session is cancelled immediately when the user returns (IdleWatcher.onIdleEnd).
+ */
+import * as vscode from 'vscode';
+import { GatewayClient } from './gatewayClient';
+import { MykroLogger } from './logger';
+import type { ChatMessage } from './types';
+import type { WorkItem } from './goalDiscovery';
+import { discoverGoals } from './goalDiscovery';
+
+const CTX = 'AutonomousSession';
+
+export type SessionState = 'idle' | 'discovering' | 'working' | 'paused';
+
+export class AutonomousSession implements vscode.Disposable {
+    private state: SessionState = 'idle';
+    private abortController: AbortController | undefined;
+    private sessionTimer: ReturnType<typeof setTimeout> | undefined;
+    private statusBar: vscode.StatusBarItem;
+    private workItems: WorkItem[] = [];
+    private currentIndex = 0;
+    private completedCount = 0;
+    private disposables: vscode.Disposable[] = [];
+
+    constructor(
+        private readonly gatewayClient: GatewayClient,
+        private readonly logger: MykroLogger,
+        private readonly ensureBackend: () => Promise<void>,
+    ) {
+        this.statusBar = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Left,
+            -100,
+        );
+        this.statusBar.command = 'mykro.toggleAutonomous';
+        this.updateStatusBar();
+        this.statusBar.show();
+        this.logger.event(CTX, 'constructed', 
+            `sessionMinutes=${this.sessionMinutes} enabled=${this.enabled}`);
+    }
+
+    private get sessionMinutes(): number {
+        return vscode.workspace.getConfiguration('mykro')
+            .get<number>('autonomousSessionMinutes', 30);
+    }
+
+    private get enabled(): boolean {
+        return vscode.workspace.getConfiguration('mykro')
+            .get<boolean>('autonomousAgentEnabled', false);
+    }
+
+    // ── Public API ──────────────────────────────────────────────────────────
+
+    /** Start an autonomous session (called by IdleWatcher or manually). */
+    async start(): Promise<void> {
+        if (!this.enabled) {
+            this.logger.info(CTX, 'start() skipped — autonomousAgentEnabled=false');
+            return;
+        }
+        if (this.state === 'working' || this.state === 'discovering') {
+            this.logger.trace(CTX, `start() no-op — already in state=${this.state}`);
+            return; // Already running
+        }
+
+        const t0 = this.logger.enter(CTX, 'start', { resumeFrom: this.currentIndex });
+        this.state = 'discovering';
+        this.updateStatusBar();
+        this.abortController = new AbortController();
+
+        try {
+            // Ensure gateway is available
+            await this.ensureBackend();
+
+            this.logger.info(CTX, 'discovering goals…');
+            this.workItems = await discoverGoals(undefined, this.logger);
+            this.currentIndex = 0;
+            this.completedCount = 0;
+
+            if (this.workItems.length === 0) {
+                this.logger.info(CTX, 'no work items found — session skipped');
+                this.state = 'idle';
+                this.updateStatusBar();
+                this.logger.exit(CTX, 'start', t0, 'no items');
+                return;
+            }
+
+            this.logger.info(CTX, 
+                `found ${this.workItems.length} items — starting ${this.sessionMinutes}-min session`);
+
+            // Arm the session timeout
+            this.sessionTimer = setTimeout(() => {
+                this.logger.info(CTX, 'session time limit reached — stopping');
+                void this.stop('timeout');
+            }, this.sessionMinutes * 60_000);
+
+            this.state = 'working';
+            this.updateStatusBar();
+
+            // Work through items
+            await this.workLoop();
+            this.logger.exit(CTX, 'start', t0, 
+                `completed ${this.completedCount}/${this.workItems.length}`);
+        } catch (err) {
+            if ((err as Error)?.name === 'AbortError') {
+                this.logger.trace(CTX, 'start() AbortError — session cancelled by user');
+            } else {
+                this.logger.exitErr(CTX, 'start', t0, err);
+            }
+        } finally {
+            // Only reset to idle if we weren't explicitly paused
+            if ((this.state as SessionState) !== 'paused') {
+                this.state = 'idle';
+            }
+            this.updateStatusBar();
+        }
+    }
+
+    /** Pause the session (user returned). Can resume later. */
+    pause(): void {
+        if (this.state !== 'working' && this.state !== 'discovering') {
+            return;
+        }
+        this.logger.event(CTX, 'paused', 
+            `at item ${this.currentIndex}/${this.workItems.length} — user activity detected`);
+        this.abortController?.abort();
+        if (this.sessionTimer) {
+            clearTimeout(this.sessionTimer);
+            this.sessionTimer = undefined;
+        }
+        this.state = 'paused';
+        this.updateStatusBar();
+    }
+
+    /** Resume a paused session on next idle. */
+    async resume(): Promise<void> {
+        if (this.state !== 'paused' || this.currentIndex >= this.workItems.length) {
+            // Nothing to resume — start fresh
+            this.logger.info(CTX, 'resume() — no paused state, starting fresh');
+            await this.start();
+            return;
+        }
+        const t0 = this.logger.enter(CTX, 'resume',
+            { index: this.currentIndex, total: this.workItems.length });
+        this.abortController = new AbortController();
+        this.sessionTimer = setTimeout(() => {
+            void this.stop('timeout');
+        }, this.sessionMinutes * 60_000);
+        this.state = 'working';
+        this.updateStatusBar();
+
+        try {
+            await this.workLoop();
+            this.logger.exit(CTX, 'resume', t0, 
+                `completed ${this.completedCount}/${this.workItems.length}`);
+        } catch (err) {
+            if ((err as Error)?.name !== 'AbortError') {
+                this.logger.exitErr(CTX, 'resume', t0, err);
+            } else {
+                this.logger.trace(CTX, 'resume() AbortError — cancelled');
+            }
+        } finally {
+            if ((this.state as SessionState) !== 'paused') {
+                this.state = 'idle';
+            }
+            this.updateStatusBar();
+        }
+    }
+
+    /** Stop the session completely. */
+    async stop(reason: 'manual' | 'timeout' | 'done' = 'manual'): Promise<void> {
+        const t0 = this.logger.enter(CTX, 'stop', 
+            { reason, completed: this.completedCount, total: this.workItems.length });
+        this.abortController?.abort();
+        if (this.sessionTimer) {
+            clearTimeout(this.sessionTimer);
+            this.sessionTimer = undefined;
+        }
+        this.state = 'idle';
+        this.updateStatusBar();
+        this.logger.info(CTX,
+            `session ended (${reason}): ${this.completedCount}/${this.workItems.length} items processed`);
+
+        // Store session summary as a memory in gateway
+        try {
+            await fetch(
+                `${(this.gatewayClient as any).baseUrl ?? 'http://127.0.0.1:8090'}/v1/memories`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: `Autonomous session (${reason}): ${this.completedCount}/${this.workItems.length} items. ` +
+                            this.workItems.slice(0, this.completedCount)
+                                .map(w => w.title).join('; '),
+                        category: 'autonomous_session',
+                    }),
+                    signal: AbortSignal.timeout(5000),
+                },
+            );
+            this.logger.info(CTX, 'session summary written to gateway memory');
+        } catch (memErr) {
+            this.logger.warn(CTX, 
+                `memory write skipped — ${memErr instanceof Error ? memErr.message : String(memErr)}`);
+        }
+        this.logger.exit(CTX, 'stop', t0);
+    }
+
+    get currentState(): SessionState {
+        return this.state;
+    }
+
+    // ── Work Loop ───────────────────────────────────────────────────────────
+
+    private async workLoop(): Promise<void> {
+        while (this.currentIndex < this.workItems.length) {
+            if (this.abortController?.signal.aborted) { return; }
+
+            const item = this.workItems[this.currentIndex];
+            this.updateStatusBar();
+            this.logger.info(CTX,
+                `[${this.currentIndex + 1}/${this.workItems.length}] processing: ` +
+                `"${item.title}" source=${item.source} priority=${item.priority ?? 'n/a'}`);
+
+            try {
+                // Process this work item
+                // ... implementation details ...
+            } catch (err) {
+                this.logger.warn(CTX, 
+                    `item ${this.currentIndex}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+
+            this.currentIndex++;
+        }
+    }
+
+    private updateStatusBar(): void {
+        const stateLabel = this.state === 'idle' ? '◯' : this.state === 'working' ? '◉' : '⊘';
+        this.statusBar.text = `MYKRO ${stateLabel}`;
+        this.statusBar.tooltip = `Autonomous: ${this.state}`;
+    }
+
+    dispose(): void {
+        this.statusBar.dispose();
+        this.disposables.forEach(d => d.dispose());
+        if (this.abortController) {
+            this.abortController.abort();
+        }
+        if (this.sessionTimer) {
+            clearTimeout(this.sessionTimer);
+        }
+    }
+}
+
+
+================================================================================
+
+SECTION 3: CONFIGURATION & SETUP SCRIPTS
+================================================================================
+
+## FILE: vscode-extension/package.json
+## LOCATION: the repository root\vscode-extension\package.json
+
+{
+  "name": "mykro-copilot",
+  "displayName": "MYKRO Local Copilot",
+  "description": "Local AI coding assistant — brings your local MYKRO model into 
+                 VS Code's Chat panel with Ask, Agent, and Plan modes.",
+  "version": "0.1.0",
+  "publisher": "mykro",
+  "repository": {
+    "type": "git",
+    "url": "https://example.com/mykro/mykro-copilot"
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": ["AI", "Chat"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "mykro",
+        "displayName": "MYKRO Local"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "mykro.copilot",
+        "fullName": "MYKRO",
+        "name": "mykro",
+        "description": "Local AI coding assistant with Ask, Agent, and Plan modes",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "plan",
+            "description": "Plan code changes without executing them"
+          },
+          {
+            "name": "agent",
+            "description": "Agent mode — reads, writes, and runs commands"
+          },
+          {
+            "name": "review",
+            "description": "Review active file for bugs, security issues, and improvements"
+          },
+          {
+            "name": "fix",
+            "description": "Fix VS Code diagnostics (errors/warnings) in the active file"
+          },
+          {
+            "name": "autonomous",
+            "description": "Manually trigger an autonomous coding session"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "MYKRO Local Copilot",
+      "properties": {
+        "mykro.gatewayUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8090",
+          "description": "URL of the MYKRO Gateway API server"
+        },
+        "mykro.defaultModel": {
+          "type": "string",
+          "default": "mykro-auto",
+          "enum": ["mykro-auto", "mykro-large", "mykro-small", "mykro-mega"],
+          "description": "Default model to use for completions"
+        },
+        "mykro.defaultMode": {
+          "type": "string",
+          "default": "agent",
+          "enum": ["ask", "agent", "plan"],
+          "description": "Default interaction mode"
+        },
+        "mykro.autoStartBackendOnPrompt": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start MYKRO backend when a prompt is sent 
+                         and gateway is offline"
+        },
+        "mykro.idleShutdownMinutes": {
+          "type": "number",
+          "default": 6,
+          "minimum": 1,
+          "description": "When auto-started by the extension, stop backend after 
+                         this many idle minutes"
+        },
+        "mykro.inlineCompletionsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline (FIM) code completions from MYKRO 
+                         (replaces Copilot suggestions)"
+        },
+        "mykro.inlineCompletionDebounceMs": {
+          "type": "number",
+          "default": 400,
+          "minimum": 100,
+          "description": "Milliseconds to debounce before requesting an inline completion"
+        },
+        "mykro.autonomousAgentEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the autonomous coding agent that works during idle periods"
+        },
+        "mykro.idleThresholdMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Minutes of inactivity before the autonomous agent starts working"
+        },
+        "mykro.autonomousSessionMinutes": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "Maximum duration (minutes) of an autonomous coding session"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "mykro.checkHealth",
+        "title": "MYKRO: Check Server Health"
+      },
+      {
+        "command": "mykro.toggleAutonomous",
+        "title": "MYKRO: Toggle Autonomous Agent"
+      },
+      {
+        "command": "mykro.startAutonomous",
+        "title": "MYKRO: Start Autonomous Session Now"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node esbuild.config.js",
+    "watch": "node esbuild.config.js --watch",
+    "package": "npx vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.0"
+  }
+}
+
+
+================================================================================
+
+## FILE: vscode-extension/wiring-registry.json
+## LOCATION: the repository root\vscode-extension\wiring-registry.json
+
+{
+  "hub_registry": {
+    "mykro-copilot-wiring": {
+      "timestamp": "2026-06-10T00:00:00Z",
+      "wires": [
+        {
+          "id": "vscode-extension-to-gateway",
+          "name": "VS Code Extension → MYKRO Gateway",
+          "source": "vscode-extension",
+          "target": "gateway",
+          "transport": "http",
+          "endpoint": "http://127.0.0.1:8090",
+          "status": "active",
+          "routes": [
+            {
+              "path": "/v1/chat/completions",
+              "method": "POST",
+              "purpose": "Chat completions (streaming)",
+              "handler": "MykroLanguageModelProvider.provideLanguageModelChatResponse()"
+            },
+            {
+              "path": "/v1/completions",
+              "method": "POST",
+              "purpose": "FIM (inline completions)",
+              "handler": "MykroInlineCompletionProvider.provideInlineCompletionItems()"
+            },
+            {
+              "path": "/v1/models",
+              "method": "GET",
+              "purpose": "List available models",
+              "handler": "MykroLanguageModelProvider.provideLanguageModelChatInformation()"
+            },
+            {
+              "path": "/health",
+              "method": "GET",
+              "purpose": "Backend health check",
+              "handler": "BackendManager.isGatewayHealthy()"
+            }
+          ],
+          "metadata": {
+            "vscode_config_key": "mykro.gatewayUrl",
+            "default_url": "http://127.0.0.1:8090",
+            "retry_count": 2,
+            "timeout_ms": 600000,
+            "auto_startup_script": "gui_flask/start-all.ps1"
+          }
+        },
+        {
+          "id": "gateway-to-model-router",
+          "name": "MYKRO Gateway → Model Router",
+          "source": "gateway",
+          "target": "model_router",
+          "transport": "import",
+          "endpoint": "gateway.py:model_router",
+          "status": "active",
+          "purpose": "Route requests based on complexity to appropriate llama-server instance",
+          "logic": {
+            "complexity_estimation": "request tokens + workspace context",
+            "small_threshold": "< 1000 tokens",
+            "large_threshold": ">= 1000 tokens",
+            "auto_routing": "enabled",
+            "fallback_strategy": "large_model"
+          }
+        },
+        {
+          "id": "model-router-to-small-model",
+          "name": "Model Router → MYKRO Small (llama-server:8081)",
+          "source": "model_router",
+          "target": "mykro-small",
+          "transport": "http",
+          "endpoint": "http://127.0.0.1:8081/completion",
+          "status": "active",
+          "metadata": {
+            "model": "Qwen2.5-Coder-1.5B-Instruct-Q8_0",
+            "max_tokens": 1024,
+            "context_size": 4096,
+            "port": 8081,
+            "use_cases": "simple tasks, FIM, autocomplete"
+          }
+        },
+        {
+          "id": "model-router-to-large-model",
+          "name": "Model Router → MYKRO Large (llama-server:8080)",
+          "source": "model_router",
+          "target": "mykro-large",
+          "transport": "http",
+          "endpoint": "http://127.0.0.1:8080/completion",
+          "status": "active",
+          "metadata": {
+            "model": "Qwen2.5-Coder-7B-Instruct-f16",
+            "max_tokens": 2048,
+            "context_size": 8192,
+            "port": 8080,
+            "use_cases": "complex analysis, refactoring, multi-file operations"
+          }
+        },
+        {
+          "id": "model-router-to-mega-model",
+          "name": "Model Router → MYKRO Mega (llama-server:8082)",
+          "source": "model_router",
+          "target": "mykro-mega",
+          "transport": "http",
+          "endpoint": "http://127.0.0.1:8082/completion",
+          "status": "active",
+          "metadata": {
+            "model": "Mixtral-8x22B-Instruct",
+            "max_tokens": 8192,
+            "context_size": 32768,
+            "port": 8082,
+            "use_cases": "large codebase analysis, architecture design, 
+                        training data generation"
+          }
+        },
+        {
+          "id": "gateway-to-memory-store",
+          "name": "MYKRO Gateway → Memory Store",
+          "source": "gateway",
+          "target": "memory_store",
+          "transport": "import",
+          "endpoint": "gateway.py:memory_store",
+          "status": "active",
+          "purpose": "Retrieve ranked memories and inject into prompt",
+          "logic": {
+            "retrieval": "keyword overlap + recency ranking",
+            "max_injection": "1000 chars",
+            "storage_file": "memories.jsonl"
+          }
+        },
+        {
+          "id": "gateway-to-context-manager",
+          "name": "MYKRO Gateway → Context Manager",
+          "source": "gateway",
+          "target": "context_manager",
+          "transport": "import",
+          "endpoint": "gateway.py:context_manager",
+          "status": "active",
+          "purpose": "Build workspace context and budget tokens",
+          "functions": {
+            "build_workspace_context": "Index files, READMEs, schemas",
+            "estimate_tokens": "Token counting for budgeting",
+            "trim_conversation": "Prune old messages to fit token limit"
+          }
+        },
+        {
+          "id": "extension-backend-manager",
+          "name": "VS Code Extension → MYKRO Backend",
+          "source": "vscode-extension",
+          "target": "start-all-script",
+          "transport": "subprocess",
+          "endpoint": "gui_flask/start-all.ps1",
+          "status": "active",
+          "purpose": "Auto-start gateway + models if offline",
+          "trigger": "gateway health check fails + autoStartBackendOnPrompt=true",
+          "metadata": {
+            "script_path": "gui_flask/start-all.ps1",
+            "launch_sequence": ["small model", "large model", "gateway"],
+            "wait_timeout_ms": 120000,
+            "health_check_interval_ms": 1500
+          }
+        }
+      ],
+      "health_checks": {
+        "gateway_endpoint": {
+          "url": "http://127.0.0.1:8090/health",
+          "expected_status": 200,
+          "interval_seconds": 30
+        },
+        "model_availability": {
+          "small": "http://127.0.0.1:8081/health",
+          "large": "http://127.0.0.1:8080/health",
+          "mega": "http://127.0.0.1:8082/health"
+        }
+      },
+      "fallback_routes": {
+        "model_unavailable": "use available model or queue request",
+        "gateway_timeout": "retry with exponential backoff (max 2 retries)",
+        "connection_refused": "prompt user to start backend"
+      },
+      "observability": {
+        "debug_log": "Output > MYKRO",
+        "request_trace": "vscode-extension/src/logger.ts",
+        "gateway_logs": "gui_flask/*.out.log",
+        "memory_audit": "memory_store.py:Memory.audit()"
+      }
+    }
+  }
+}
+
+
+================================================================================
+
+## FILE: mykro-copilot-setup.ps1
+## LOCATION: the repository root\mykro-copilot-setup.ps1
+
+#!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+MYKRO Copilot Wiring Verification & Setup Script
+
+Verifies end-to-end connectivity and sets up MYKRO as a Copilot replacement 
+in VS Code.
+
+.DESCRIPTION
+This script:
+1. Checks if gateway backend is running
+2. Verifies all models are healthy
+3. Confirms VS Code extension is installed
+4. Sets MYKRO as default chat model
+5. Enables inline completions
+6. Launches a health report
+
+.EXAMPLE
+.\mykro-copilot-setup.ps1
+
+.EXAMPLE
+.\mykro-copilot-setup.ps1 -Verbose
+
+#>
+
+param(
+    [switch]$SkipAutoStart,
+    [switch]$Verbose = $false,
+    [switch]$AutoAccept = $false
+)
+
+$ErrorActionPreference = 'Continue'
+$ProgressPreference = 'SilentlyContinue'
+
+# ── Colors & Output ────────────────────────────────────────────────────
+function Write-Header {
+    param([string]$text)
+    Write-Host "`n$('=' * 80)" -ForegroundColor Cyan
+    Write-Host "  $text" -ForegroundColor Cyan
+    Write-Host "$('=' * 80)`n" -ForegroundColor Cyan
+}
+
+function Write-Success {
+    param([string]$text)
+    Write-Host "✓ $text" -ForegroundColor Green
+}
+
+function Write-Error {
+    param([string]$text)
+    Write-Host "✗ $text" -ForegroundColor Red
+}
+
+function Write-Warn {
+    param([string]$text)
+    Write-Host "⚠ $text" -ForegroundColor Yellow
+}
+
+function Write-Info {
+    param([string]$text)
+    Write-Host "ℹ $text" -ForegroundColor Blue
+}
+
+# ── Health Check Functions ────────────────────────────────────────────
+function Test-Gateway {
+    param([string]$url = "http://127.0.0.1:8090")
+    try {
+        $response = Invoke-WebRequest -Uri "$url/health" -TimeoutSec 5 `
+                                     -UseBasicParsing -ErrorAction Stop
+        if ($response.StatusCode -eq 200) {
+            $data = $response.Content | ConvertFrom-Json
+            return $data
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Test-Model {
+    param(
+        [string]$port,
+        [string]$name
+    )
+    try {
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/health" `
+                                     -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
+        if ($response.StatusCode -eq 200) {
+            return $true
+        }
+    } catch {
+        return $false
+    }
+}
+
+function Start-MykroBackend {
+    Write-Info "Starting MYKRO backend..."
+    $scriptPath = Join-Path $PSScriptRoot "gui_flask"
+    $scriptPath = Join-Path $scriptPath "start-all.ps1"
+    
+    if (-not (Test-Path $scriptPath)) {
+        Write-Error "Could not find start-all.ps1 at: $scriptPath"
+        return $false
+    }
+
+    try {
+        # Launch in background
+        $pwsh = (Get-Command powershell.exe -ErrorAction Stop).Source
+        $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -NoGUI"
+        $process = Start-Process -FilePath $pwsh -ArgumentList $arguments `
+                                -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
+
+        Write-Info "Backend process started (PID: $($process.Id))"
+        Write-Info "Waiting for gateway to be ready (up to 120 seconds)..."
+
+        # Wait for gateway
+        $maxAttempts = 40  # 120s / 3s
+        $attempt = 0
+        while ($attempt -lt $maxAttempts) {
+            $health = Test-Gateway
+            if ($health) {
+                Write-Success "Gateway is healthy!"
+                return $true
+            }
+            $attempt++
+            Write-Host "." -NoNewline -ForegroundColor Cyan
+            Start-Sleep -Seconds 3
+        }
+
+        Write-Error "Gateway did not become healthy within 120 seconds"
+        return $false
+    } catch {
+        Write-Error "Failed to start backend: $_"
+        return $false
+    }
+}
+
+function Get-VSCodeConfig {
+    # Try to find VS Code settings.json in workspace
+    $workspaceSettings = @(
+        ".vscode/settings.json"
+        "$env:APPDATA\Code\User\settings.json"
+    )
+
+    foreach ($path in $workspaceSettings) {
+        if (Test-Path $path) {
+            $raw = Get-Content $path -Raw
+            $obj = $raw | ConvertFrom-Json
+            $ht = @{}
+            if ($obj -ne $null) {
+                foreach ($p in $obj.PSObject.Properties) {
+                    $ht[$p.Name] = $p.Value
+                }
+            }
+            return $ht
+        }
+    }
+    
+    return @{}
+}
+
+function Update-VSCodeConfig {
+    param(
+        [hashtable]$updates
+    )
+    
+    # Try workspace settings first
+    $settingsPath = ".vscode/settings.json"
+    
+    if (-not (Test-Path ".vscode")) {
+        New-Item -ItemType Directory -Path ".vscode" -Force | Out-Null
+    }
+
+    if (Test-Path $settingsPath) {
+        $raw = Get-Content $settingsPath -Raw
+        $obj = $raw | ConvertFrom-Json
+        $config = @{}
+        if ($obj -ne $null) {
+            foreach ($p in $obj.PSObject.Properties) {
+                $config[$p.Name] = $p.Value
+            }
+        }
+    } else {
+        $config = @{}
+    }
+
+    # Merge updates
+    foreach ($key in $updates.Keys) {
+        $config[$key] = $updates[$key]
+    }
+
+    # Write with proper encoding
+    $config | ConvertTo-Json -Depth 10 | Out-File -FilePath $settingsPath `
+                                                   -Encoding utf8 -Force
+    Write-Success "Updated VS Code settings: $settingsPath"
+}
+
+# ── Main Script ────────────────────────────────────────────────────────
+Write-Header "MYKRO Copilot — Wiring Verification & Setup"
+
+# Step 1: Check gateway
+Write-Info "Step 1: Checking MYKRO Gateway..."
+$health = Test-Gateway
+
+if (-not $health) {
+    Write-Warn "Gateway is not running"
+    
+    if ($SkipAutoStart) {
+        Write-Error "Cannot proceed without gateway. Please start it manually: cd gui_flask; .\start-all.ps1"
+        exit 1
+    }
+
+    $startResponse = "Y"
+    if (-not $AutoAccept) { $startResponse = Read-Host "Start MYKRO backend now? (Y/n)" }
+    if ($startResponse -ne "n") {
+        $result = Start-MykroBackend
+        if (-not $result) {
+            exit 1
+        }
+        $health = Test-Gateway
+    } else {
+        exit 1
+    }
+}
+
+Write-Success "Gateway is accessible at http://127.0.0.1:8090"
+
+# Step 2: Check models
+Write-Info "`nStep 2: Checking model availability..."
+
+$availableModels = @()
+$health.models.PSObject.Properties | ForEach-Object {
+    $modelName = $_.Name
+    $modelStatus = $_.Value
+    
+    if ($modelStatus -in @("ok", "auto-routed")) {
+        Write-Success "$modelName : $modelStatus"
+        $availableModels += $modelName
+    } else {
+        Write-Warn "$modelName : $modelStatus"
+    }
+}
+
+if ($availableModels.Count -eq 0) {
+    Write-Error "No models are available! Check logs: gui_flask/*.out.log"
+    exit 1
+}
+
+# [Script continues with VS Code config verification and extension setup...]
+
+
+================================================================================
+
+## FILE: scripts/write_mykro_settings.ps1
+## LOCATION: the repository root\scripts\write_mykro_settings.ps1
+
+$settingsPath = ".vscode\settings.json"
+if (-not (Test-Path ".vscode")) { 
+    New-Item -ItemType Directory -Path ".vscode" -Force | Out-Null 
+}
+
+if (Test-Path $settingsPath) {
+    $raw = Get-Content $settingsPath -Raw
+    $obj = $raw | ConvertFrom-Json
+    $config = @{}
+    if ($obj -ne $null) {
+        foreach ($p in $obj.PSObject.Properties) {
+            $config[$p.Name] = $p.Value
+        }
+    }
+} else {
+    $config = @{}
+}
+
+$updates = @{
+ 'mykro.gatewayUrl' = 'http://127.0.0.1:8090'
+ 'mykro.defaultModel' = 'mykro-auto'
+ 'mykro.inlineCompletionsEnabled' = $true
+ 'mykro.autoStartBackendOnPrompt' = $true
+}
+
+foreach ($k in $updates.Keys) { $config[$k] = $updates[$k] }
+
+$config | ConvertTo-Json -Depth 10 | Out-File -FilePath $settingsPath -Encoding utf8 -Force
+Write-Host "WROTE"
+Get-Content $settingsPath -Raw
+
+
+================================================================================
+
+## FILE: gui_flask/config.json (EXCERPT)
+## LOCATION: the repository root\gui_flask\config.json
+
+{
+  "model": {
+    "endpoint": "http://127.0.0.1:8090/v1/chat/completions",
+    "type": "gateway",
+    "default_server": "MYKRO Large (Qwen2.5-Coder-7B)",
+    "model_path": "model\\Qwen2.5-Coder-7B-Instruct-f16.gguf"
+  },
+  "servers": [
+    {
+      "name": "MYKRO Small (Qwen2.5-Coder-1.5B)",
+      "exe": "llama-server.exe",
+      "args": [
+        "-m",
+        "..\\model\\Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf",
+        "--port",
+        "8081",
+        "--host",
+        "127.0.0.1",
+        "-c",
+        "4096",
+        "-t",
+        "20",
+        "-tb",
+        "40",
+        "-ngl",
+        "0",
+        "--device",
+        "none",
+        "--numa",
+        "distribute"
+      ],
+      "cwd": ".."
+    },
+    {
+      "name": "MYKRO Large (Qwen2.5-Coder-7B)",
+      "exe": "llama-server.exe",
+      "args": [
+        "-m",
+        "..\\model\\Qwen2.5-Coder-7B-Instruct-f16.gguf",
+        "--port",
+        "8080",
+        "--host",
+        "127.0.0.1",
+        "-c",
+        "8192",
+        "-t",
+        "20",
+        "-tb",
+        "40",
+        "-ngl",
+        "0",
+        "--device",
+        "none",
+        "--numa",
+        "distribute"
+      ],
+      "cwd": ".."
+    },
+    {
+      "name": "MYKRO Gateway",
+      "exe": "python.exe",
+      "args": [
+        "gateway.py"
+      ],
+      "cwd": "."
+    }
+  ],
+  "startup": {
+    "server_mode": "all",
+    "auto_start_web_ui": true,
+    "auto_start_household": true,
+    "autoconfig_on_launch": true,
+    "autofix_gateway_deps": true,
+    "rewrite_invalid_config": true
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "agent_max_iterations": 25,
+    "auto_approve_reads": true,
+    "behaviors": {
+      "autonomy_policy": "mostly_autonomous",
+      "approval_mode": "audit",
+      "adaptive_loop_depth": true,
+      "tool_result_compression": true,
+      "tool_result_compression_chars": 3000,
+      "tool_result_line_limit": 80,
+      "ask_agent_escalation": true,
+      "autolearn_enabled": true,
+      "autolearn_dedup_enabled": true,
+      "autolearn_similarity_threshold": 0.85,
+      "external_chat_autolearn": true,
+      "dry_run": false
+    },
+    "large_model": {
+      "name": "mykro-large",
+      "endpoint": "http://127.0.0.1:8080",
+      "model_path": "..\\model\\Qwen2.5-Coder-7B-Instruct-f16.gguf",
+      "max_tokens": 2048,
+      "context_size": 8192
+    },
+    "small_model": {
+      "name": "mykro-small",
+      "endpoint": "http://127.0.0.1:8081",
+      "model_path": "..\\model\\Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf",
+      "max_tokens": 1024,
+      "context_size": 4096
+    }
+  },
+  "dual_model": {
+    "enabled": true,
+    "executor_endpoint": "http://127.0.0.1:8081/completion",
+    "default_executor_server": "MYKRO Small (Qwen2.5-Coder-1.5B)",
+    "executor_type": "llamacpp",
+    "router_strategy": "complexity",
+    "fallback_to_planner_on_error": true
+  },
+  "settings": {
+    "self_think": true,
+    "show_self_thought": true,
+    "three_turn": true,
+    "temperature": 0.4,
+    "timeout_secs": 180
+  }
+}
+
+
+================================================================================
+
+END OF EXPORT
+================================================================================
+
+Document generated: 2026-08-18
+Total sections: 3 (Architecture, Extension Code, Config & Scripts)
+Total files exported: 10
+Format: Organized text export with clear section headers and spacing
+Ready for: Offline reference, documentation, and knowledge transfer
+
+================================================================================

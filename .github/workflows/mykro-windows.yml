@@ -1,0 +1,69 @@
+name: Windows exe
+
+"on":
+  pull_request:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build MYKRO.exe
+        run: python build_exe.py
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "dist\MYKRO.exe"
+          if (-not (Test-Path $exe)) {
+            throw "MYKRO.exe was not produced at $exe"
+          }
+          Write-Host "Built $exe ($((Get-Item $exe).Length) bytes)"
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "MYKRO.exe --version exited $LASTEXITCODE" }
+          & $exe --self-check
+          if ($LASTEXITCODE -ne 0) { throw "MYKRO.exe --self-check exited $LASTEXITCODE" }
+
+      - name: Upload MYKRO.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: MYKRO-windows
+          path: dist/MYKRO.exe
+          if-no-files-found: error
+
+      - name: Attach exe to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release view $tag
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag dist/MYKRO.exe --clobber
+          } else {
+            gh release create $tag dist/MYKRO.exe --title $tag --notes "MYKRO Windows executable"
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

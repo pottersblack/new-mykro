@@ -1,0 +1,269 @@
+MYKRO EXTENSIVE WORK-NEEDED DOCUMENT
+Generated: 2026-05-18
+Workspace: the repository root
+
+====================================================================
+0) PLAIN-LANGUAGE EXPLANATION
+====================================================================
+This document is a structured stabilization plan for MYKRO. It states
+that major recovery work has already happened (services were brought
+back, endpoint routing was hardened, and diagnostics were clean), but
+the system is not yet fully release-ready until runtime behavior is
+proven repeatedly under real conditions.
+
+The core message is prioritization: first validate live behavior
+end-to-end, then harden startup/shutdown reliability and logging, and
+finally add regression protection. The plan separates this into
+workstreams so implementation can stay focused: runtime API validation,
+browser/UI interaction checks, process hygiene, observability
+improvements, and automated tests for endpoint contracts.
+
+It also defines measurable completion criteria. Instead of “it seems
+fixed,” it requires repeatable evidence: consecutive successful
+endpoint passes after clean restarts, no UI fallback replies during
+normal operation, reliable one-step startup/stop behavior, and tests
+that detect future route drift. This makes sign-off objective and
+auditable.
+
+The risk and handoff sections are practical guardrails. They call out
+common failure patterns (stale processes, port collisions,
+frontend/backend drift, warmup timing issues) and prescribe exactly
+what evidence to capture when regressions occur. The final enhancement
+section is intentionally deferred, signaling that new features should
+wait until stability and validation are closed.
+
+====================================================================
+1) EXECUTIVE OVERVIEW
+====================================================================
+This document captures the practical work still needed to move MYKRO from
+"recovered and partially validated" to "fully stable and release-ready" for
+core local orchestration flows (Desktop GUI + Web UI + Gateway + model servers).
+
+Current known state (from latest troubleshooting cycle):
+- Core recovery succeeded at least once (services were restarted and reached healthy ports).
+- Backend/UI route hardening was implemented:
+  - Frontend neural UI model controls were moved to stable endpoints (/api/start, /api/stop).
+  - Backend start logic was hardened to resolve model IDs (e.g., mykro-large/mykro-small/mykro-auto).
+- Prior mismatch issues between frontend route calls and live server behavior were identified.
+- Source-level validations and diagnostics were clean after patching.
+- Final end-to-end runtime validation pass remains the key outstanding item.
+
+Bottom line:
+- Architecture direction is good.
+- Main remaining effort is operational verification, regression shielding, and
+  repeatable startup/runtime confidence.
+
+====================================================================
+2) WHAT IS ALREADY DONE (DO NOT REDO UNLESS REGRESSION FOUND)
+====================================================================
+A. Service recovery path tested:
+   - Stack restart via start-all script path was exercised.
+   - Ports for web/gateway/model endpoints were verified as listening in recovery pass.
+
+B. Frontend/backend route alignment improvements:
+   - Neural UI model controls now target stable backend routes.
+   - Compatibility route strategy and/or hardened backend logic were introduced.
+
+C. Backend start behavior improved:
+   - /api/start can resolve logical model IDs to configured launch targets.
+
+D. Diagnostics status:
+   - No immediate static/diagnostic file errors after edits.
+
+Important: Preserve this behavior while completing remaining work below.
+
+====================================================================
+3) PRIMARY REMAINING WORKSTREAMS
+====================================================================
+
+WORKSTREAM A — Final Live Runtime Validation (Highest Priority)
+---------------------------------------------------------------
+Goal:
+- Prove current code behaves correctly in the running process, not just in source
+  or in-process test client contexts.
+
+Tasks:
+1. Verify active process ownership for port 5000 before tests.
+2. Validate endpoint matrix one-by-one (avoid long chained commands):
+   - GET  /api/health
+   - POST /api/start      with model payload (mykro-large and mykro-small)
+   - POST /api/stop
+   - POST /api/completion with short deterministic prompt
+3. Confirm response codes, schema, and content shape consistency.
+4. Repeat once after full restart to verify cold-start stability.
+
+Acceptance criteria:
+- 2 consecutive passes without 404/500 for core control endpoints.
+- Completion endpoint returns expected JSON structure and non-empty response.
+- No fallback text path is triggered in normal chat operation.
+
+
+WORKSTREAM B — Browser/UI Functional Validation
+-----------------------------------------------
+Goal:
+- Confirm the neural UI interaction path is stable for real user actions.
+
+Tasks:
+1. Launch Web UI and perform Start/Stop/Reload actions from UI controls.
+2. Submit chat prompts and verify no fallback synthetic response appears.
+3. Confirm status banners/labels correctly reflect backend state transitions.
+4. Validate model switch interactions (large/small/auto where exposed).
+
+Acceptance criteria:
+- UI buttons map to successful backend actions.
+- No route errors in browser dev console for model-control actions.
+- UX remains responsive during server transition periods.
+
+
+WORKSTREAM C — Startup Reliability and Process Hygiene
+------------------------------------------------------
+Goal:
+- Ensure repeatable startup/shutdown behavior and eliminate stale-process ambiguity.
+
+Tasks:
+1. Standardize launch entrypoint for operator workflows (prefer one canonical script path).
+2. Add/confirm pre-launch cleanup logic:
+   - detect occupied target ports
+   - identify stale Python/Flask processes
+   - clear or report conflicts before start
+3. Add/confirm post-launch readiness checks with bounded retries.
+4. Confirm graceful shutdown stops gateway + model server processes cleanly.
+
+Acceptance criteria:
+- One-step startup reliably reaches healthy state.
+- One-step shutdown reliably releases ports.
+- No ghost/stale listeners after stop.
+
+
+WORKSTREAM D — Logging, Observability, and Fast Triage
+------------------------------------------------------
+Goal:
+- Make failures obvious and quickly diagnosable.
+
+Tasks:
+1. Normalize key logs (web_ui, gateway, model server) with timestamps + severity.
+2. Ensure errors include route, payload shape summary, and upstream target info.
+3. Add a minimal startup summary block (what started, where, and health result).
+4. Add a focused troubleshooting section to README for common local failures.
+
+Acceptance criteria:
+- Any failed call can be traced within <= 2 minutes from logs.
+- Common issues have clear next actions in docs.
+
+
+WORKSTREAM E — Regression Tests for Route Contract and Startup
+--------------------------------------------------------------
+Goal:
+- Prevent recurrence of endpoint drift and startup regressions.
+
+Tasks:
+1. Add/update tests for:
+   - /api/start model ID resolution behavior
+   - /api/stop behavior in running and non-running states
+   - /api/completion basic proxy success path
+2. Add startup smoke test assertions for expected ports/routes.
+3. Add frontend route contract test if feasible (static check or lightweight integration).
+
+Acceptance criteria:
+- Test suite catches route drift before manual runtime testing.
+- Smoke tests fail loudly on missing endpoint mappings.
+
+====================================================================
+4) PRIORITY ORDER (EXECUTION PLAN)
+====================================================================
+Phase 1 (Immediate):
+- Workstream A (final live validation)
+- Workstream B (UI action validation)
+
+Phase 2 (Stability hardening):
+- Workstream C (startup reliability)
+- Workstream D (observability)
+
+Phase 3 (Protection):
+- Workstream E (regression tests)
+
+Suggested timeboxing:
+- Phase 1: same day
+- Phase 2: 1 day
+- Phase 3: 0.5 to 1 day
+
+====================================================================
+5) DETAILED CHECKLIST (COPY/PASTE INTO TASK TRACKER)
+====================================================================
+[ ] Confirm active service process identity on :5000 before testing
+[ ] Validate GET /api/health (2 consecutive passes)
+[ ] Validate POST /api/start with mykro-large
+[ ] Validate POST /api/start with mykro-small
+[ ] Validate POST /api/stop from running state
+[ ] Validate POST /api/stop from idle state
+[ ] Validate POST /api/completion returns expected non-empty response
+[ ] Restart stack and re-run full endpoint matrix
+[ ] Validate Start/Stop/Reload from neural UI controls
+[ ] Confirm no frontend fallback text appears during normal backend availability
+[ ] Verify browser console has no route errors for model controls
+[ ] Standardize canonical startup script path in docs
+[ ] Add preflight check for port conflicts
+[ ] Add readiness check with bounded retry + explicit timeout messaging
+[ ] Verify one-step shutdown clears listeners/processes
+[ ] Improve log context on endpoint failures
+[ ] Add runtime troubleshooting section to README
+[ ] Add regression tests for /api/start, /api/stop, /api/completion contracts
+[ ] Add startup smoke assertions for route availability
+[ ] Final sign-off run: cold start -> UI action -> completion -> clean stop
+
+====================================================================
+6) RISK REGISTER
+====================================================================
+Risk 1: Running code differs from edited source (stale process/image)
+- Impact: false negatives/positives during validation
+- Mitigation: always identify process PID + executable path before tests
+
+Risk 2: Route drift between frontend and backend
+- Impact: UI controls silently degrade
+- Mitigation: contract tests + single source-of-truth route constants
+
+Risk 3: Port collisions from old processes
+- Impact: startup appears successful but talks to wrong process
+- Mitigation: preflight kill/report + startup ownership checks
+
+Risk 4: Multi-step command interruptions in terminal
+- Impact: ambiguous diagnostics
+- Mitigation: short single-purpose checks and explicit pass/fail logs
+
+Risk 5: Model warmup latency interpreted as failure
+- Impact: flaky startup probes
+- Mitigation: readiness polling with realistic timeout windows
+
+====================================================================
+7) DEFINITION OF DONE (DoD)
+====================================================================
+The work is considered complete only when ALL are true:
+1. Endpoint matrix passes twice consecutively after clean restarts.
+2. UI model controls work without route errors.
+3. Completion path is stable and returns non-empty backend responses.
+4. Startup/shutdown behavior is repeatable and documented.
+5. Regression tests cover key route contract and startup expectations.
+6. Logs and docs enable quick triage for common failures.
+
+====================================================================
+8) HANDOFF NOTES FOR NEXT IMPLEMENTATION PASS
+====================================================================
+- Focus on runtime proof first; do not expand features before validation closure.
+- Keep changes minimal and contract-preserving.
+- Prefer stable endpoint usage and explicit model-id resolution semantics.
+- If any regression appears, capture:
+  1) exact endpoint,
+  2) status code,
+  3) response snippet,
+  4) relevant log tail,
+  5) process/port ownership at time of failure.
+
+====================================================================
+9) OPTIONAL FUTURE ENHANCEMENTS (POST-STABILITY)
+====================================================================
+- Add health dashboard tile in UI for gateway/model/web status.
+- Introduce route contract schema validation at app startup.
+- Add small "self-heal" button that runs preflight + controlled restart.
+- Add lightweight telemetry counters for endpoint failures and retries.
+
+End of document.

@@ -1,0 +1,386 @@
+{
+  "generated_at": "2026-04-08T10:31:13.847836+00:00",
+  "window_title": "MYKRO Constellation Orchestrator",
+  "window_rect": {
+    "left": 163,
+    "top": 81,
+    "width": 1583,
+    "height": 999
+  },
+  "tabs": [
+    {
+      "text": "Admin",
+      "screen_left": 1657,
+      "screen_top": 149,
+      "width": 44,
+      "height": 11,
+      "conf": 96
+    },
+    {
+      "text": "Server",
+      "screen_left": 211,
+      "screen_top": 198,
+      "width": 40,
+      "height": 12,
+      "conf": 96
+    },
+    {
+      "text": "Memory",
+      "screen_left": 396,
+      "screen_top": 198,
+      "width": 56,
+      "height": 16,
+      "conf": 94
+    },
+    {
+      "text": "Automation",
+      "screen_left": 498,
+      "screen_top": 198,
+      "width": 80,
+      "height": 12,
+      "conf": 83
+    },
+    {
+      "text": "Website",
+      "screen_left": 297,
+      "screen_top": 199,
+      "width": 52,
+      "height": 11,
+      "conf": 95
+    },
+    {
+      "text": "[system]",
+      "screen_left": 194,
+      "screen_top": 239,
+      "width": 67,
+      "height": 12,
+      "conf": 90
+    },
+    {
+      "text": "[system]",
+      "screen_left": 194,
+      "screen_top": 256,
+      "width": 67,
+      "height": 13,
+      "conf": 96
+    },
+    {
+      "text": "model",
+      "screen_left": 797,
+      "screen_top": 256,
+      "width": 41,
+      "height": 10,
+      "conf": 92
+    },
+    {
+      "text": "Search",
+      "screen_left": 512,
+      "screen_top": 1043,
+      "width": 57,
+      "height": 15,
+      "conf": 96
+    }
+  ],
+  "buttons": [
+    {
+      "text": "MYKRO",
+      "screen_left": 196,
+      "screen_top": 147,
+      "width": 94,
+      "height": 20,
+      "conf": 92
+    },
+    {
+      "text": "MYKRO.",
+      "screen_left": 368,
+      "screen_top": 239,
+      "width": 49,
+      "height": 10,
+      "conf": 91
+    },
+    {
+      "text": "chat.",
+      "screen_left": 588,
+      "screen_top": 239,
+      "width": 39,
+      "height": 10,
+      "conf": 96
+    },
+    {
+      "text": "Auto-started",
+      "screen_left": 289,
+      "screen_top": 256,
+      "width": 105,
+      "height": 10,
+      "conf": 91
+    },
+    {
+      "text": "MYKRO",
+      "screen_left": 403,
+      "screen_top": 256,
+      "width": 44,
+      "height": 10,
+      "conf": 91
+    },
+    {
+      "text": "Load..",
+      "screen_left": 877,
+      "screen_top": 257,
+      "width": 39,
+      "height": 9,
+      "conf": 89
+    },
+    {
+      "text": "Running:",
+      "screen_left": 208,
+      "screen_top": 979,
+      "width": 58,
+      "height": 15,
+      "conf": 93
+    },
+    {
+      "text": "MYKRO",
+      "screen_left": 272,
+      "screen_top": 979,
+      "width": 49,
+      "height": 11,
+      "conf": 91
+    },
+    {
+      "text": "Start",
+      "screen_left": 555,
+      "screen_top": 979,
+      "width": 29,
+      "height": 11,
+      "conf": 80
+    },
+    {
+      "text": "Stop",
+      "screen_left": 622,
+      "screen_top": 979,
+      "width": 44,
+      "height": 15,
+      "conf": 33
+    },
+    {
+      "text": "Stop",
+      "screen_left": 810,
+      "screen_top": 979,
+      "width": 32,
+      "height": 15,
+      "conf": 96
+    }
+  ],
+  "labels": [
+    {
+      "text": "AYER",
+      "screen_left": 219,
+      "screen_top": 95,
+      "width": 27,
+      "height": 11,
+      "conf": 43
+    },
+    {
+      "text": "|",
+      "screen_left": 163,
+      "screen_top": 123,
+      "width": 10,
+      "height": 13,
+      "conf": 49
+    },
+    {
+      "text": "Status:",
+      "screen_left": 1521,
+      "screen_top": 149,
+      "width": 42,
+      "height": 11,
+      "conf": 77
+    },
+    {
+      "text": "ready",
+      "screen_left": 1569,
+      "screen_top": 149,
+      "width": 35,
+      "height": 15,
+      "conf": 51
+    },
+    {
+      "text": "E|",
+      "screen_left": 163,
+      "screen_top": 173,
+      "width": 10,
+      "height": 11,
+      "conf": 81
+    },
+    {
+      "text": "Al",
+      "screen_left": 163,
+      "screen_top": 206,
+      "width": 10,
+      "height": 11,
+      "conf": 84
+    },
+    {
+      "text": "Welcome",
+      "screen_left": 272,
+      "screen_top": 239,
+      "width": 60,
+      "height": 10,
+      "conf": 94
+    },
+    {
+      "text": "to",
+      "screen_left": 343,
+      "screen_top": 239,
+      "width": 16,
+      "height": 10,
+      "conf": 92
+    },
+    {
+      "text": "Type",
+      "screen_left": 431,
+      "screen_top": 239,
+      "width": 32,
+      "height": 12,
+      "conf": 96
+    },
+    {
+      "text": "to",
+      "screen_left": 562,
+      "screen_top": 239,
+      "width": 16,
+      "height": 10,
+      "conf": 96
+    },
+    {
+      "text": "a",
+      "screen_left": 474,
+      "screen_top": 241,
+      "width": 7,
+      "height": 8,
+      "conf": 96
+    },
+    {
+      "text": "message",
+      "screen_left": 491,
+      "screen_top": 241,
+      "width": 60,
+      "height": 10,
+      "conf": 94
+    },
+    {
+      "text": "(Quen2.5-Coder-78)",
+      "screen_left": 510,
+      "screen_top": 255,
+      "width": 153,
+      "height": 14,
+      "conf": 55
+    },
+    {
+      "text": "waiting",
+      "screen_left": 692,
+      "screen_top": 255,
+      "width": 60,
+      "height": 14,
+      "conf": 96
+    },
+    {
+      "text": "Large",
+      "screen_left": 457,
+      "screen_top": 256,
+      "width": 41,
+      "height": 13,
+      "conf": 93
+    },
+    {
+      "text": "for",
+      "screen_left": 761,
+      "screen_top": 256,
+      "width": 27,
+      "height": 13,
+      "conf": 96
+    },
+    {
+      "text": "to",
+      "screen_left": 850,
+      "screen_top": 256,
+      "width": 16,
+      "height": 10,
+      "conf": 93
+    },
+    {
+      "text": "©",
+      "screen_left": 273,
+      "screen_top": 259,
+      "width": 6,
+      "height": 6,
+      "conf": 88
+    },
+    {
+      "text": "-",
+      "screen_left": 674,
+      "screen_top": 261,
+      "width": 9,
+      "height": 2,
+      "conf": 48
+    },
+    {
+      "text": "ir",
+      "screen_left": 1735,
+      "screen_top": 269,
+      "width": 11,
+      "height": 10,
+      "conf": 95
+    },
+    {
+      "text": "®",
+      "screen_left": 533,
+      "screen_top": 976,
+      "width": 16,
+      "height": 17,
+      "conf": 52
+    },
+    {
+      "text": "A\\",
+      "screen_left": 705,
+      "screen_top": 978,
+      "width": 18,
+      "height": 15,
+      "conf": 62
+    },
+    {
+      "text": "Large",
+      "screen_left": 327,
+      "screen_top": 979,
+      "width": 35,
+      "height": 15,
+      "conf": 92
+    },
+    {
+      "text": "(Qwen2.5-Coder-7B)",
+      "screen_left": 367,
+      "screen_top": 979,
+      "width": 134,
+      "height": 13,
+      "conf": 41
+    },
+    {
+      "text": "Emergency",
+      "screen_left": 729,
+      "screen_top": 979,
+      "width": 77,
+      "height": 15,
+      "conf": 95
+    }
+  ],
+  "other": [
+    {
+      "text": "@",
+      "screen_left": 481,
+      "screen_top": 1040,
+      "width": 18,
+      "height": 20,
+      "conf": 76
+    }
+  ]
+}

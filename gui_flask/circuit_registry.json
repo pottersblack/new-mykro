@@ -1,0 +1,406 @@
+{
+  "version": 1,
+  "description": "MYKRO Circuit Registry \u2014 every script, model, launcher, and service must be registered here before it can run.",
+  "circuits": {
+    "CKT-GW-001": {
+      "label": "MYKRO Gateway",
+      "type": "service",
+      "entry_point": "gateway.py",
+      "status": "enabled",
+      "dependencies": [],
+      "permissions": [
+        "network",
+        "model_routing",
+        "tool_dispatch"
+      ],
+      "resource_hooks": {
+        "port": 8090,
+        "health": "/ping"
+      }
+    },
+    "CKT-MDL-001": {
+      "label": "MYKRO Large (Qwen2.5-Coder-7B)",
+      "type": "model",
+      "entry_point": "llama-server",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "inference"
+      ],
+      "resource_hooks": {
+        "port": 8080,
+        "health": "/health"
+      },
+      "fallback_chain": [
+        "CKT-MDL-002"
+      ],
+      "auto_reset_after_s": 120
+    },
+    "CKT-MDL-002": {
+      "label": "MYKRO Small (Qwen2.5-Coder-1.5B)",
+      "type": "model",
+      "entry_point": "llama-server",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "inference"
+      ],
+      "resource_hooks": {
+        "port": 8081,
+        "health": "/health"
+      },
+      "fallback_chain": [
+        "CKT-MDL-001"
+      ],
+      "auto_reset_after_s": 120
+    },
+    "CKT-MDL-003": {
+      "label": "MYKRO Mega (Mixtral-8x22B)",
+      "type": "model",
+      "entry_point": "llama-server",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "inference"
+      ],
+      "resource_hooks": {
+        "port": 8082,
+        "health": "/health"
+      },
+      "fallback_chain": [
+        "CKT-MDL-001"
+      ],
+      "auto_reset_after_s": 300
+    },
+    "CKT-GUI-001": {
+      "label": "Desktop Orchestrator",
+      "type": "ui",
+      "entry_point": "orchestrator_tk.py",
+      "status": "enabled",
+      "dependencies": [],
+      "permissions": [
+        "server_management",
+        "chat",
+        "memory",
+        "settings"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-HH-001": {
+      "label": "Household Chat",
+      "type": "ui",
+      "entry_point": "household.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "chat",
+        "logging"
+      ],
+      "resource_hooks": {
+        "port": 5001,
+        "health": "/"
+      }
+    },
+    "CKT-DA-001": {
+      "label": "Desktop Agent",
+      "type": "service",
+      "entry_point": "desktop_agent.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GUI-001"
+      ],
+      "permissions": [
+        "screen_read",
+        "automation",
+        "file_write"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TOOL-file_ops": {
+      "label": "Tool: File Operations",
+      "type": "tool",
+      "entry_point": "tools/file_ops.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "file_read",
+        "file_write"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TOOL-terminal": {
+      "label": "Tool: Terminal",
+      "type": "tool",
+      "entry_point": "tools/terminal.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "command_exec"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TOOL-search": {
+      "label": "Tool: Search",
+      "type": "tool",
+      "entry_point": "tools/search.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "file_read"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TOOL-git_ops": {
+      "label": "Tool: Git Operations",
+      "type": "tool",
+      "entry_point": "tools/git_ops.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "git"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TOOL-web": {
+      "label": "Tool: Web",
+      "type": "tool",
+      "entry_point": "tools/web.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "network"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TOOL-web_search": {
+      "label": "Tool: Web Search",
+      "type": "tool",
+      "entry_point": "tools/web.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "network"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TOOL-node": {
+      "label": "Tool: Node (remote executor)",
+      "type": "tool",
+      "entry_point": "tools/node.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "network",
+        "command_exec"
+      ],
+      "resource_hooks": {
+        "port": 8095,
+        "health": "/ping"
+      }
+    },
+    "CKT-TOOL-coding": {
+      "label": "Tool: Coding (tests + diagnostics)",
+      "type": "tool",
+      "entry_point": "tools/coding.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "command_exec",
+        "file_read"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-PLAN-001": {
+      "label": "Planner Engine",
+      "type": "module",
+      "entry_point": "planner_engine.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001",
+        "CKT-MOD-router",
+        "CKT-MOD-context",
+        "CKT-MOD-prompts"
+      ],
+      "permissions": [
+        "planning"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-EXEC-001": {
+      "label": "Executor Engine",
+      "type": "module",
+      "entry_point": "executor_engine.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "tool_dispatch"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-VERIFY-001": {
+      "label": "Verifier Engine",
+      "type": "module",
+      "entry_point": "verifier_engine.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001",
+        "CKT-MOD-context"
+      ],
+      "permissions": [
+        "verification"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-APPROVAL-001": {
+      "label": "Approval Engine",
+      "type": "module",
+      "entry_point": "approval_engine.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "approval_policy"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-TIMELINE-001": {
+      "label": "Timeline Bus",
+      "type": "module",
+      "entry_point": "timeline_bus.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "logging"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-MOD-router": {
+      "label": "Model Router",
+      "type": "module",
+      "entry_point": "model_router.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [],
+      "resource_hooks": {}
+    },
+    "CKT-MOD-context": {
+      "label": "Context Manager",
+      "type": "module",
+      "entry_point": "context_manager.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "file_read"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-MOD-prompts": {
+      "label": "System Prompts",
+      "type": "module",
+      "entry_point": "system_prompts.py",
+      "status": "enabled",
+      "dependencies": [],
+      "permissions": [],
+      "resource_hooks": {}
+    },
+    "CKT-LAUNCH-all": {
+      "label": "Launcher: start-all.ps1",
+      "type": "launcher",
+      "entry_point": "start-all.ps1",
+      "status": "enabled",
+      "dependencies": [],
+      "permissions": [
+        "process_spawn"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-LAUNCH-desktop": {
+      "label": "Launcher: start-desktop.ps1",
+      "type": "launcher",
+      "entry_point": "start-desktop.ps1",
+      "status": "enabled",
+      "dependencies": [],
+      "permissions": [
+        "process_spawn"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-LAUNCH-household": {
+      "label": "Launcher: start-household.ps1",
+      "type": "launcher",
+      "entry_point": "start-household.ps1",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "process_spawn"
+      ],
+      "resource_hooks": {}
+    },
+    "CKT-WEB-001": {
+      "label": "Web UI (Flask)",
+      "type": "ui",
+      "entry_point": "web_ui.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "chat",
+        "server_management"
+      ],
+      "resource_hooks": {
+        "port": 5000,
+        "health": "/"
+      }
+    },
+    "CKT-DISC-001": {
+      "label": "Discord Bot",
+      "type": "service",
+      "entry_point": "discord_bot.py",
+      "status": "enabled",
+      "dependencies": [
+        "CKT-GW-001"
+      ],
+      "permissions": [
+        "network",
+        "chat"
+      ],
+      "resource_hooks": {}
+    }
+  }
+}

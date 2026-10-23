@@ -1,0 +1,48 @@
+## Python / project ignores
+# Virtual environments
+gui_flask/.venv/
+.venv/
+
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+logs/
+
+# Packaging build artifacts
+dist/
+build/
+*.spec
+
+# Development-only fallback outputs
+tools/dev_dist/
+
+# Ignore built installers and binaries
+*.exe
+
+# Data / logs / generated
+*.jsonl
+logs/
+temp/
+
+# Model artifacts
+model/*.gguf
+model/*.bin
+model/*.safetensors
+
+# Environment files
+.env
+*.env
+.env.local
+!.env.example
+
+# Machine-specific runtime config. The public default is gui_flask/config.default.json.
+gui_flask/config.json
+
+# IDE / Editor
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store

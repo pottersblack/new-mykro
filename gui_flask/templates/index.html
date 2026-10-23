@@ -1,0 +1,694 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MYKRO Orchestrator (Web)</title>
+    <style>
+      *,*::before,*::after{box-sizing:border-box}
+      body{font-family:Segoe UI,Arial,sans-serif;margin:0;padding:16px;background:#f0f2f5;color:#222}
+      h2{margin:0 0 12px;color:#1a1a2e;font-size:20px}
+      h3{margin:16px 0 6px;font-size:12px;color:#555;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e8e8e8;padding-bottom:3px}
+      /* Banner */
+      .banner{background:#fff;border:1px solid #ddd;border-left:4px solid #aaa;border-radius:4px;padding:10px 14px;margin-bottom:10px}
+      .banner.ok{border-left-color:#4caf50;background:#f1f8f4}
+      .banner.error{border-left-color:#f44336;background:#fdeae6}
+      .banner-text{font-weight:600;font-size:14px}
+      .banner-hint{font-size:12px;color:#666;margin-top:2px}
+      /* Emergency Stop */
+      .emerg-bar{display:flex;gap:10px;align-items:center;margin-bottom:12px;background:#1a0000;border:1px solid #c62828;border-radius:4px;padding:8px 12px}
+      #emergency-stop{background:#c62828;color:#fff;border:none;border-radius:4px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+      #emergency-stop:hover{background:#b71c1c}
+      #emergency-stop:disabled{background:#757575;cursor:not-allowed}
+      #emerg-status{font-size:12px;color:#ffaaa0}
+      /* Cards */
+      .card{background:#fff;border:1px solid #ddd;border-radius:6px;padding:14px;margin-bottom:12px}
+      /* Server row */
+      .server-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+      .server-row label{font-size:12px;white-space:nowrap;color:#555}
+      .server-row input[type="text"]{flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      /* Chat */
+      #chat{border:1px solid #ddd;border-radius:4px;background:#fff;height:280px;overflow-y:auto;padding:8px;margin-bottom:8px}
+      .msg{margin:6px 0;padding:6px 10px;border-radius:4px;font-size:13px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+      .msg.user{background:#e3f2fd;color:#1565c0}
+      .msg.assistant{background:#f3e5f5;color:#6a1b9a}
+      .msg.system{background:#fff3e0;color:#e65100;font-style:italic}
+      .msg.error{background:#ffebee;color:#c62828}
+      .chat-input-row{display:flex;gap:8px;align-items:flex-start}
+      textarea{font-family:Consolas,monospace;resize:vertical;flex:1;min-height:80px;padding:8px;border:1px solid #ccc;border-radius:4px;font-size:13px}
+      .chat-btns{display:flex;flex-direction:column;gap:6px;width:110px}
+      .mode-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+      .mode-row label{font-size:12px;color:#555;white-space:nowrap}
+      .attach-row{display:flex;align-items:center;gap:8px;margin:6px 0 8px;flex-wrap:wrap}
+      .attach-drop{font-size:12px;color:#666;border:1px dashed #c7d3e0;border-radius:4px;padding:6px 8px;background:#fafcff}
+      .attach-list{display:flex;flex-wrap:wrap;gap:6px;min-height:24px}
+      .attach-chip{display:inline-flex;align-items:center;gap:6px;background:#eef5ff;border:1px solid #c7dfff;border-radius:999px;padding:3px 8px;font-size:11px;color:#335}
+      .attach-chip button{border:none;background:none;color:#335;padding:0;line-height:1;font-weight:700;cursor:pointer}
+      .attach-row.drag-over .attach-drop{border-color:#1565c0;background:#e8f0ff}
+      /* Buttons */
+      button{padding:6px 12px;border:1px solid #ccc;border-radius:4px;background:#fff;cursor:pointer;font-size:13px;white-space:nowrap}
+      button:hover{background:#f0f0f0}
+      button:active{background:#e0e0e0}
+      button.primary{background:#1565c0;border-color:#1565c0;color:#fff}
+      button.primary:hover{background:#0d47a1}
+      input[type="text"],input[type="number"],select{padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;background:#fff}
+      /* Memory */
+      #memory-list{height:150px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;background:#fafafa;padding:4px;margin-bottom:8px}
+      .mem-item{display:flex;align-items:flex-start;gap:6px;padding:4px 6px;border-bottom:1px solid #eee;font-size:12px}
+      .mem-item:last-child{border-bottom:none}
+      .mem-text{flex:1;word-break:break-word;color:#333}
+      .mem-del{background:none;border:none;color:#bbb;cursor:pointer;padding:0 4px;font-size:15px;line-height:1}
+      .mem-del:hover{color:#c62828}
+      .mem-add-row{display:flex;gap:6px}
+      .mem-add-row input{flex:1}
+      #memory-search-inp{width:100%;margin-bottom:8px}
+      /* Wiring */
+      #wiring-table{width:100%;font-size:12px;border-collapse:collapse}
+      #wiring-table th{text-align:left;color:#666;font-weight:600;padding:4px 8px;border-bottom:2px solid #eee}
+      #wiring-table td{padding:3px 8px;border-bottom:1px solid #f0f0f0}
+      .wire-ok{color:#388e3c}
+      .wire-error{color:#c62828}
+      .wire-unknown{color:#999}
+    </style>
+  </head>
+  <body>
+    <h2>MYKRO Orchestrator (Web)</h2>
+
+    <!-- Status Banner -->
+    <div id="banner" class="banner">
+      <div class="banner-text" id="banner-text">Checking backends…</div>
+      <div class="banner-hint" id="banner-hint"></div>
+    </div>
+
+    <!-- Emergency Stop -->
+    <div class="emerg-bar">
+      <button id="emergency-stop" title="Halt all in-flight gateway tasks and stop the model server">&#9888; EMERGENCY STOP</button>
+      <span id="emerg-status"></span>
+    </div>
+
+    <!-- Server Controls -->
+    <div class="card">
+      <h3>Model Server</h3>
+      <div class="server-row">
+        <label>Model:</label>
+        <input type="text" id="model" value="{{ default_model|e }}" title="{{ default_model|e }}" placeholder="Path to .gguf model" />
+        <label>Port:</label>
+        <input type="number" id="port" value="8080" style="width:72px" />        <label>Ctx:</label>
+        <input type="number" id="ctx-size" value="8192" style="width:72px" title="Context window size" />
+        <label>Threads:</label>
+        <input type="number" id="threads" value="8" style="width:58px" title="CPU threads" />        <button id="start">Start Server</button>
+        <button id="stop">Stop Server</button>
+        <button id="autoconfig" title="Auto-detect models/executables and update config">⚙ Autoconfig</button>
+      </div>
+    </div>
+
+    <!-- Chat -->
+    <div class="card">
+      <h3>Chat</h3>
+      <div id="chat"></div>
+      <div class="mode-row">
+        <label for="chat-mode">Mode:</label>
+        <select id="chat-mode">
+          <option value="ask">Ask (single-turn)</option>
+          <option value="agent" selected>Agent (tool-calling)</option>
+          <option value="tools">Tools (explicit)</option>
+        </select>
+        <label for="chat-model-sel" style="margin-left:10px">Model:</label>
+        <select id="chat-model-sel">
+          <option value="mykro-auto">Auto</option>
+          <option value="mykro-large">Large</option>
+          <option value="mykro-small">Small</option>
+        </select>
+      </div>
+      <div class="attach-row" id="attach-row">
+        <button id="attach-btn" type="button" title="Attach text files">Attach Files</button>
+        <input id="attach-input" type="file" multiple accept=".txt,.md,.py,.json,.yaml,.yml,.csv,.log,.html,.js,.ts,.tsx,.jsx,.css,.xml" style="display:none" />
+        <div class="attach-drop" id="attach-drop">Drag & drop text files here</div>
+        <div class="attach-list" id="attach-list"></div>
+      </div>
+      <div class="chat-input-row">
+        <textarea id="prompt" placeholder="Type a message… (Ctrl+Enter to send)"></textarea>
+        <div class="chat-btns">
+          <button class="primary" id="send">Send</button>
+          <button id="clear">Clear</button>
+          <button id="save-btn">Save Chat</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memory -->
+    <div class="card">
+      <h3>Memory</h3>
+      <input type="text" id="memory-search-inp" placeholder="Search memories…" />
+      <div id="memory-list"><em style="color:#aaa;font-size:12px;padding:4px">Loading…</em></div>
+      <div class="mem-add-row">
+        <input type="text" id="memory-input" placeholder="New memory text…" />
+        <button class="primary" id="memory-add-btn">Add</button>
+        <button id="memory-refresh-btn" title="Reload">&#8635;</button>
+      </div>
+    </div>
+
+    <!-- Wiring Status -->
+    <div class="card">
+      <h3>Wiring Status <span id="wiring-summary" style="font-size:12px;font-weight:normal;color:#888;text-transform:none;letter-spacing:0"></span>
+        <button id="wiring-probe-btn" title="Force health-check all wires" style="margin-left:10px;font-size:11px;padding:3px 8px">Probe All</button>
+      </h3>
+      <div style="overflow-x:auto">
+        <table id="wiring-table">
+          <thead><tr><th>Wire</th><th>Source</th><th>Target</th><th>Status</th></tr></thead>
+          <tbody id="wiring-tbody"><tr><td colspan="4" style="color:#aaa;font-size:12px">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const HEALTH_POLL_MS = 5000;
+      const FETCH_TIMEOUT_MS = 10000;
+
+      async function fetchT(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), ms);
+        try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+        finally { clearTimeout(t); }
+      }
+
+      function safeJson(text) {
+        try { return JSON.parse(text); } catch { return text; }
+      }
+
+      // Wiring contract name. Callers can use either helper.
+      function parseResponseBody(text) {
+        return safeJson(text);
+      }
+
+      // ── Banner ────────────────────────────────────────────────────────────────
+      async function updateBannerStatus() {
+        try {
+          const r = await fetchT('/api/health');
+          const d = safeJson(await r.text());
+          const el = document.getElementById('banner');
+          const bt = document.getElementById('banner-text');
+          const bh = document.getElementById('banner-hint');
+          if (r.ok && d.gateway === 'ok') {
+            el.className = 'banner ok';
+            bt.innerText = '✓ Gateway Ready';
+            const activeModels = Object.entries(d.models || {})
+              .filter(([,v]) => v === 'ok' || v === 'auto-routed').map(([k]) => k).join(', ');
+            // Populate model selector from health data
+            const sel = document.getElementById('chat-model-sel');
+            const existing = Array.from(sel.options).map(o => o.value);
+            Object.keys(d.models || {}).forEach(m => {
+              if (!existing.includes(m)) {
+                const o = new Option(m, m); sel.appendChild(o);
+              }
+            });
+            bh.innerText = activeModels ? `Models: ${activeModels}` : 'No models — start server or check model path.';
+          } else {
+            el.className = 'banner error';
+            bt.innerText = '⚠ No Backend';
+            bh.innerText = 'Start Gateway on port 8090 (run start-all.ps1) or check model servers on 8080/8081.';
+          }
+        } catch {
+          document.getElementById('banner').className = 'banner error';
+          document.getElementById('banner-text').innerText = '⚠ Connection Failed';
+          document.getElementById('banner-hint').innerText = 'Cannot reach gateway on 127.0.0.1:8090. Run start-all.ps1 or start gateway manually.';
+        }
+      }
+
+      // ── Wiring Status ────────────────────────────────────────────────────────
+      async function updateWiring() {
+        try {
+          const r = await fetchT('/api/wiring');
+          if (!r.ok) {
+            document.getElementById('wiring-tbody').innerHTML = `<tr><td colspan="4" style="color:#c62828">Error: HTTP ${r.status}</td></tr>`;
+            return;
+          }
+          const data = safeJson(await r.text());
+          const wires = Object.values(data.wires || {});
+          const active = wires.filter(w => w.status === 'active' || w.status === 'ok').length;
+          const err = wires.filter(w => w.status === 'error' || w.status === 'disconnected').length;
+          document.getElementById('wiring-summary').innerText = `(${active} active, ${err} errors, ${wires.length} total)`;
+          const tbody = document.getElementById('wiring-tbody');
+          if (!wires.length) {
+            tbody.innerHTML = '<tr><td colspan="4" style="color:#aaa">No wires registered.</td></tr>';
+            return;
+          }
+          tbody.innerHTML = wires.map(w => {
+            const cls = (w.status === 'active' || w.status === 'ok') ? 'wire-ok' : w.status === 'unknown' ? 'wire-unknown' : 'wire-error';
+            const name = w.name || w.id || '';
+            return `<tr><td>${name}</td><td>${w.source || ''}</td><td>${w.target || ''}</td><td class="${cls}">${w.status || '?'}</td></tr>`;
+          }).join('');
+        } catch (e) {
+          document.getElementById('wiring-tbody').innerHTML = `<tr><td colspan="4" style="color:#aaa">${e.message}</td></tr>`;
+        }
+      }
+
+      // ── Chat ─────────────────────────────────────────────────────────────────
+      const CHAT_MAX_TURNS = 20;
+      const CHAT_INPUT_MAX_CHARS = 12000;
+      const CHAT_ATTACH_MAX_FILES = 5;
+      const CHAT_ATTACH_MAX_BYTES_PER_FILE = 256 * 1024;
+      const CHAT_ATTACH_MAX_TOTAL_BYTES = 768 * 1024;
+      const CHAT_ATTACH_MAX_CHARS_PER_FILE = 12000;
+      const CHAT_SYSTEM_PROMPT = 'You are MYKRO, a helpful local AI assistant. Maintain conversational continuity across turns and keep replies natural and concise unless the user asks for detail.';
+      const CHAT_STORAGE_KEY = 'mykro.web.chat.v1';
+      let chatHistory = [];
+      let chatTranscript = [];
+      let pendingAttachments = [];
+      const promptInput = document.getElementById('prompt');
+      const attachRow = document.getElementById('attach-row');
+      const attachInput = document.getElementById('attach-input');
+      const attachList = document.getElementById('attach-list');
+
+      function _renderAttachmentList() {
+        if (!attachList) return;
+        if (!pendingAttachments.length) {
+          attachList.innerHTML = '';
+          return;
+        }
+        attachList.innerHTML = pendingAttachments.map((att, idx) => {
+          const trunc = att.truncated ? ' · truncated' : '';
+          return `<span class="attach-chip">${att.name} (${att.chars} chars${trunc})<button type="button" data-attach-rm="${idx}" aria-label="Remove attachment">×</button></span>`;
+        }).join('');
+        attachList.querySelectorAll('[data-attach-rm]').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const index = Number(btn.getAttribute('data-attach-rm'));
+            if (!Number.isNaN(index)) {
+              pendingAttachments.splice(index, 1);
+              _renderAttachmentList();
+            }
+          });
+        });
+      }
+
+      async function _readFileAsText(file) {
+        return await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+          reader.readAsText(file);
+        });
+      }
+
+      async function _addAttachmentFiles(fileList) {
+        const files = Array.from(fileList || []);
+        if (!files.length) return;
+        let totalBytes = pendingAttachments.reduce((sum, att) => sum + (att.size || 0), 0);
+        for (const file of files) {
+          if (pendingAttachments.length >= CHAT_ATTACH_MAX_FILES) {
+            appendChat('system', `⚠ Attachment limit reached (${CHAT_ATTACH_MAX_FILES} files max).`);
+            break;
+          }
+          if (file.size > CHAT_ATTACH_MAX_BYTES_PER_FILE) {
+            appendChat('system', `⚠ Skipped ${file.name}: file too large (${file.size} bytes).`);
+            continue;
+          }
+          if ((totalBytes + file.size) > CHAT_ATTACH_MAX_TOTAL_BYTES) {
+            appendChat('system', '⚠ Attachment total size limit reached.');
+            break;
+          }
+          try {
+            const raw = await _readFileAsText(file);
+            let text = raw;
+            let truncated = false;
+            if (text.length > CHAT_ATTACH_MAX_CHARS_PER_FILE) {
+              text = text.slice(0, CHAT_ATTACH_MAX_CHARS_PER_FILE);
+              truncated = true;
+            }
+            if (!text.trim()) {
+              appendChat('system', `⚠ Skipped ${file.name}: empty or non-text file.`);
+              continue;
+            }
+            pendingAttachments.push({
+              name: file.name,
+              type: file.type || 'text/plain',
+              size: file.size,
+              content: text,
+              truncated,
+              chars: text.length,
+            });
+            totalBytes += file.size;
+          } catch {
+            appendChat('system', `⚠ Failed to read ${file.name}.`);
+          }
+        }
+        _renderAttachmentList();
+      }
+
+      function _clipPromptInput({ notify = false, origin = 'input' } = {}) {
+        if (!promptInput) return;
+        const value = promptInput.value || '';
+        if (value.length <= CHAT_INPUT_MAX_CHARS) return;
+        const original = value.length;
+        promptInput.value = value.slice(0, CHAT_INPUT_MAX_CHARS);
+        if (notify) {
+          appendChat('system', `⚠ Input truncated to ${CHAT_INPUT_MAX_CHARS} characters (${origin}: ${original} chars).`);
+        }
+      }
+
+      function _handlePromptPaste(event) {
+        if (!promptInput) return;
+        const pasted = (event.clipboardData && event.clipboardData.getData('text')) || '';
+        if (!pasted) return;
+        const start = Number.isInteger(promptInput.selectionStart) ? promptInput.selectionStart : promptInput.value.length;
+        const end = Number.isInteger(promptInput.selectionEnd) ? promptInput.selectionEnd : start;
+        const existingAfterReplace = promptInput.value.length - Math.max(0, end - start);
+        const room = Math.max(0, CHAT_INPUT_MAX_CHARS - existingAfterReplace);
+        if (pasted.length <= room) return;
+        event.preventDefault();
+        const clipped = pasted.slice(0, room);
+        if (typeof promptInput.setRangeText === 'function') {
+          promptInput.setRangeText(clipped, start, end, 'end');
+        } else {
+          promptInput.value = `${promptInput.value.slice(0, start)}${clipped}${promptInput.value.slice(end)}`;
+        }
+        appendChat('system', `⚠ Paste truncated to ${CHAT_INPUT_MAX_CHARS} characters (${pasted.length} chars received).`);
+      }
+
+      function _saveChatSession() {
+        try {
+          localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify({
+            history: chatHistory,
+            transcript: chatTranscript,
+          }));
+        } catch {}
+      }
+
+      function _loadChatSession() {
+        try {
+          const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          const parsedHistory = Array.isArray(parsed?.history) ? parsed.history : [];
+          const parsedTranscript = Array.isArray(parsed?.transcript) ? parsed.transcript : [];
+
+          chatHistory = parsedHistory
+            .filter(m => m && ['user', 'assistant', 'system'].includes(String(m.role || '').toLowerCase()))
+            .map(m => ({ role: String(m.role).toLowerCase(), content: String(m.content || '').trim() }))
+            .filter(m => m.content);
+
+          chatTranscript = parsedTranscript
+            .filter(m => m && ['user', 'assistant', 'system', 'error'].includes(String(m.role || '').toLowerCase()))
+            .map(m => ({ role: String(m.role).toLowerCase(), text: String(m.text || '').trim() }))
+            .filter(m => m.text);
+
+          const maxMessages = CHAT_MAX_TURNS * 2;
+          if (chatHistory.length > maxMessages) chatHistory = chatHistory.slice(-maxMessages);
+          if (chatTranscript.length > maxMessages + 20) chatTranscript = chatTranscript.slice(-(maxMessages + 20));
+
+          for (const item of chatTranscript) {
+            appendChat(item.role, item.text, false);
+          }
+        } catch {}
+      }
+
+      function _pushChatHistory(role, content) {
+        const cleanRole = String(role || '').toLowerCase();
+        const cleanContent = String(content || '').trim();
+        if (!cleanContent || !['user', 'assistant', 'system'].includes(cleanRole)) return;
+        chatHistory.push({ role: cleanRole, content: cleanContent });
+        const maxMessages = CHAT_MAX_TURNS * 2;
+        if (chatHistory.length > maxMessages) {
+          chatHistory = chatHistory.slice(-maxMessages);
+        }
+        _saveChatSession();
+      }
+
+      function appendChat(role, text, persist = true) {
+        const c = document.getElementById('chat');
+        const div = document.createElement('div');
+        let cls = 'msg ';
+        let display = text;
+        if (role === 'user') { cls += 'user'; }
+        else if (role === 'assistant') { cls += 'assistant'; }
+        else if (role === 'system') { cls += 'system'; }
+        else { cls += 'error'; try { const j = JSON.parse(text); display = j.error + (j.hint ? '\n' + j.hint : ''); } catch {} }
+        div.className = cls;
+        const label = role === 'user' ? 'You' : role === 'assistant' ? 'Assistant' : role.charAt(0).toUpperCase() + role.slice(1);
+        div.innerText = `${label}: ${display}`;
+        c.appendChild(div);
+        c.scrollTop = c.scrollHeight;
+        if (persist) {
+          chatTranscript.push({ role: String(role || '').toLowerCase(), text: String(text || '') });
+          const maxMessages = CHAT_MAX_TURNS * 2;
+          if (chatTranscript.length > maxMessages + 20) {
+            chatTranscript = chatTranscript.slice(-(maxMessages + 20));
+          }
+          _saveChatSession();
+        }
+      }
+
+      function parseAssistantResponse(text) {
+        try {
+          const data = JSON.parse(text);
+          if (typeof data?.response === 'string' && data.response.trim()) return data.response.trim();
+          if (typeof data?.content === 'string' && data.content.trim()) return data.content.trim();
+          if (typeof data?.answer === 'string' && data.answer.trim()) return data.answer.trim();
+        } catch {}
+        return String(text || '').trim();
+      }
+
+      async function sendMessage() {
+        _clipPromptInput({ notify: true, origin: 'send' });
+        const prompt = document.getElementById('prompt').value.trim();
+        if (!prompt) return;
+        const mode = document.getElementById('chat-mode').value;
+        const model = document.getElementById('chat-model-sel').value;
+        appendChat('user', prompt);
+        _pushChatHistory('user', prompt);
+        document.getElementById('prompt').value = '';
+        document.getElementById('send').disabled = true;
+        try {
+          const messages = [
+            { role: 'system', content: CHAT_SYSTEM_PROMPT },
+            ...chatHistory,
+          ];
+          const body = {
+            prompt,
+            n_predict: 1024,
+            temperature: 0.2,
+            mode,
+            model,
+            messages,
+            attachments: pendingAttachments.map(att => ({
+              name: att.name,
+              type: att.type,
+              content: att.content,
+              truncated: !!att.truncated,
+            })),
+          };
+          const r = await fetchT('/api/completion', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+          }, 120000);
+          const txt = await r.text();
+          if (r.ok) {
+            const assistantText = parseAssistantResponse(txt) || '(empty response)';
+            appendChat('assistant', assistantText);
+            _pushChatHistory('assistant', assistantText);
+          } else {
+            appendChat('error', txt);
+          }
+        } catch (e) {
+          appendChat('error', `Request failed: ${e.message}`);
+        } finally {
+          pendingAttachments = [];
+          _renderAttachmentList();
+          document.getElementById('send').disabled = false;
+        }
+      }
+
+      document.getElementById('send').onclick = sendMessage;
+      promptInput.maxLength = CHAT_INPUT_MAX_CHARS;
+      promptInput.addEventListener('input', () => _clipPromptInput({ notify: false, origin: 'input' }));
+      promptInput.addEventListener('paste', _handlePromptPaste);
+      document.getElementById('prompt').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendMessage();
+      });
+      document.getElementById('clear').onclick = () => {
+        document.getElementById('chat').innerHTML = '';
+        chatHistory = [];
+        chatTranscript = [];
+        pendingAttachments = [];
+        _renderAttachmentList();
+        try { localStorage.removeItem(CHAT_STORAGE_KEY); } catch {}
+      };
+      document.getElementById('attach-btn').onclick = () => attachInput && attachInput.click();
+      attachInput.addEventListener('change', async e => {
+        await _addAttachmentFiles(e.target.files);
+        attachInput.value = '';
+      });
+      promptInput.addEventListener('dragover', e => {
+        e.preventDefault();
+        attachRow.classList.add('drag-over');
+      });
+      promptInput.addEventListener('dragleave', () => attachRow.classList.remove('drag-over'));
+      promptInput.addEventListener('drop', async e => {
+        e.preventDefault();
+        attachRow.classList.remove('drag-over');
+        await _addAttachmentFiles(e.dataTransfer?.files || []);
+      });
+      document.getElementById('save-btn').onclick = () => {
+        const text = Array.from(document.getElementById('chat').children).map(n => n.innerText).join('\n\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+        a.download = `chat_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+        a.click();
+      };
+
+      // ── Server Controls ───────────────────────────────────────────────────────
+      document.getElementById('start').onclick = async () => {
+        const model = document.getElementById('model').value.trim();
+        if (!model) { appendChat('system', 'Specify a model path first.'); return; }
+        try {
+          const r = await fetchT('/api/start', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, port: +document.getElementById('port').value, ctx: +document.getElementById('ctx-size').value, threads: +document.getElementById('threads').value })
+          });
+          appendChat('system', await r.text());
+        } catch (e) { appendChat('error', `Start failed: ${e.message}`); }
+      };
+      document.getElementById('stop').onclick = async () => {
+        try {
+          const r = await fetchT('/api/stop', { method: 'POST' });
+          appendChat('system', await r.text());
+        } catch (e) { appendChat('error', `Stop failed: ${e.message}`); }
+      };
+      document.getElementById('autoconfig').onclick = async () => {
+        try {
+          const r = await fetchT('/api/autoconfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          }, 45000);
+          const d = safeJson(await r.text());
+          if (!r.ok) {
+            const msg = (d && d.message) ? d.message : `Autoconfig failed: HTTP ${r.status}`;
+            appendChat('error', msg);
+            return;
+          }
+          const models = Array.isArray(d.found_models) ? d.found_models.join(', ') : '';
+          appendChat('system', `Autoconfig complete. Models: ${models || 'none'}; default: ${d.default_server || 'n/a'}`);
+          await updateBannerStatus();
+          await updateWiring();
+        } catch (e) {
+          appendChat('error', `Autoconfig failed: ${e.message}`);
+        }
+      };
+
+      // ── Emergency Stop ────────────────────────────────────────────────────────
+      document.getElementById('emergency-stop').onclick = async () => {
+        const btn = document.getElementById('emergency-stop');
+        const st = document.getElementById('emerg-status');
+        btn.disabled = true; st.innerText = 'Stopping…';
+        try {
+          const r = await fetchT('/api/emergency_stop', { method: 'POST' }, 6000);
+          st.innerText = r.ok ? '✓ Stopped — resumes in 10 s' : `Error: HTTP ${r.status}`;
+          appendChat('system', 'Emergency Stop issued. All in-flight tasks halted.');
+        } catch (e) { st.innerText = `Failed: ${e.message}`; }
+        setTimeout(() => { btn.disabled = false; st.innerText = ''; }, 11000);
+      };
+
+      // ── Memory ────────────────────────────────────────────────────────────────
+      let _allMemories = [];
+
+      function renderMemories(items) {
+        const el = document.getElementById('memory-list');
+        if (!items.length) { el.innerHTML = '<em style="color:#aaa;font-size:12px;padding:4px">No memories stored.</em>'; return; }
+        el.innerHTML = '';
+        items.forEach(m => {
+          const row = document.createElement('div'); row.className = 'mem-item';
+          const txt = document.createElement('span'); txt.className = 'mem-text';
+          txt.title = m.text || ''; txt.innerText = (m.text || '').substring(0, 200);
+          const del = document.createElement('button'); del.className = 'mem-del'; del.innerText = '×'; del.title = 'Delete';
+          del.onclick = () => deleteMemory(m.id);
+          row.appendChild(txt); row.appendChild(del);
+          el.appendChild(row);
+        });
+      }
+
+      async function loadMemories() {
+        try {
+          const r = await fetchT('/api/memories');
+          if (!r.ok) { document.getElementById('memory-list').innerHTML = '<em style="color:#c62828">Failed to load memories.</em>'; return; }
+          const data = safeJson(await r.text());
+          _allMemories = Array.isArray(data) ? data : (data.data || data.memories || data.items || []);
+          applyMemoryFilter();
+        } catch (e) {
+          document.getElementById('memory-list').innerHTML = `<em style="color:#aaa">${e.message}</em>`;
+        }
+      }
+
+      function applyMemoryFilter() {
+        const q = document.getElementById('memory-search-inp').value.toLowerCase().trim();
+        renderMemories(q ? _allMemories.filter(m => (m.text || '').toLowerCase().includes(q)) : _allMemories);
+      }
+
+      async function addMemory() {
+        const inp = document.getElementById('memory-input');
+        const text = inp.value.trim();
+        if (!text) return;
+        try {
+          const r = await fetchT('/api/memories', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text })
+          });
+          if (r.ok) { inp.value = ''; loadMemories(); }
+          else appendChat('system', `Memory add failed: HTTP ${r.status}`);
+        } catch (e) { appendChat('error', `Memory add failed: ${e.message}`); }
+      }
+
+      async function deleteMemory(id) {
+        if (!id) return;
+        try {
+          const r = await fetchT(`/api/memories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          if (r.ok) loadMemories();
+          else appendChat('system', `Memory delete failed: HTTP ${r.status}`);
+        } catch (e) { appendChat('error', `Memory delete failed: ${e.message}`); }
+      }
+
+      document.getElementById('memory-add-btn').onclick = addMemory;
+      document.getElementById('memory-refresh-btn').onclick = loadMemories;
+      document.getElementById('memory-input').addEventListener('keydown', e => { if (e.key === 'Enter') addMemory(); });
+      document.getElementById('memory-search-inp').addEventListener('input', applyMemoryFilter);
+
+      // ── Wiring Probe ──────────────────────────────────────────────────────────
+      document.getElementById('wiring-probe-btn').onclick = async () => {
+        const btn = document.getElementById('wiring-probe-btn');
+        btn.disabled = true; btn.textContent = 'Probing…';
+        try {
+          const r = await fetchT('/api/wiring?probe=true', {}, 45000);
+          if (!r.ok) {
+            document.getElementById('wiring-tbody').innerHTML = `<tr><td colspan="4" style="color:#c62828">Probe error: HTTP ${r.status}</td></tr>`;
+            return;
+          }
+          const data = safeJson(await r.text());
+          const wires = Object.values(data.wires || {});
+          const active = wires.filter(w => w.status === 'active' || w.status === 'ok').length;
+          const err = wires.filter(w => w.status === 'error' || w.status === 'disconnected').length;
+          document.getElementById('wiring-summary').innerText = `(${active} active, ${err} errors, ${wires.length} total — probed)`;
+          document.getElementById('wiring-tbody').innerHTML = wires.map(w => {
+            const cls = (w.status === 'active' || w.status === 'ok') ? 'wire-ok' : w.status === 'unknown' ? 'wire-unknown' : 'wire-error';
+            return `<tr><td>${w.name||w.id||''}</td><td>${w.source||''}</td><td>${w.target||''}</td><td class="${cls}">${w.status||'?'}</td></tr>`;
+          }).join('');
+        } catch(e) {
+          document.getElementById('wiring-tbody').innerHTML = `<tr><td colspan="4" style="color:#aaa">${e.message}</td></tr>`;
+        } finally {
+          btn.disabled = false; btn.textContent = 'Probe All';
+        }
+      };
+
+      // ── Init ──────────────────────────────────────────────────────────────────
+      (function() {
+        try {
+          const m = new URLSearchParams(window.location.search).get('model');
+          if (m) document.getElementById('model').value = decodeURIComponent(m);
+        } catch {}
+      })();
+
+      updateBannerStatus();
+      updateWiring();
+      loadMemories();
+      _loadChatSession();
+      setInterval(updateBannerStatus, HEALTH_POLL_MS);
+      setInterval(updateWiring, HEALTH_POLL_MS);
+    </script>
+  </body>
+</html>

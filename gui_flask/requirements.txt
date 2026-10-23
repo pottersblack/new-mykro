@@ -1,0 +1,19 @@
+Flask>=2.0
+requests
+zeroconf>=0.131.0
+# Desktop GUI uses built-in tkinter (no external GUI package required)
+
+# Gateway API (OpenAI-compatible server)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+httpx>=0.25.0
+
+# Desktop automation agent (optional — GUI works without these)
+pyautogui>=0.9.54
+Pillow>=10.0
+pynput>=1.7.6
+pytesseract>=0.3.10  # also requires Tesseract OCR engine installed on Windows
+
+# Discord integration (optional)
+discord.py>=2.3.0
+aiohttp>=3.9.0

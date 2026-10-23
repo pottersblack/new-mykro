@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MYKRO State Renderer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b10;
+      --panel: #101522;
+      --panel2: #0d1119;
+      --border: #2a3550;
+      --text: #dce4f5;
+      --muted: #90a0c0;
+      --primary: #56c7ff;
+      --primary-2: #8cdbff;
+      --danger: #ff7d7d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+      background: radial-gradient(circle at 50% -10%, #1d2945 0%, var(--bg) 45%);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .shell {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+    .card {
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    .title { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 12px; color: var(--primary); }
+    .subtitle { font-size: 12px; color: var(--muted); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+    .btn {
+      border: 1px solid var(--border);
+      background: #16223a;
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .btn:hover { border-color: var(--primary); color: var(--primary-2); }
+    .btn.primary { background: #14405f; border-color: #1d5f86; color: #eaf7ff; }
+    .stage { position: relative; height: 460px; background: radial-gradient(circle at 50% 55%, rgba(86,199,255,.08), rgba(9,11,16,.95)); }
+    canvas { width: 100%; height: 100%; display: block; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
+      gap: 10px;
+      padding: 12px 14px;
+    }
+    .meta-item {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .meta-item strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 15px;
+      color: var(--text);
+      text-transform: none;
+      letter-spacing: normal;
+    }
+    .status {
+      padding: 0 14px 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .error { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="card">
+      <div class="head">
+        <div>
+          <div class="title">State Renderer</div>
+          <div class="subtitle" id="state-render-source">No snapshot loaded</div>
+        </div>
+        <div class="subtitle" id="state-render-session">session: —</div>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-current">Render Current State</button>
+        <button class="btn" id="btn-prev">Render Previous Generation</button>
+        <button class="btn" id="btn-refresh">Refresh Last Mode</button>
+        <button class="btn" id="btn-open-neural">Open Neural Web UI</button>
+      </div>
+      <div class="stage">
+        <canvas id="state-render-canvas"></canvas>
+      </div>
+      <div class="meta">
+        <div class="meta-item">Entropy<strong id="state-meta-entropy">—</strong></div>
+        <div class="meta-item">Dominance<strong id="state-meta-dominance">—</strong></div>
+        <div class="meta-item">Branch Spread<strong id="state-meta-branch">—</strong></div>
+        <div class="meta-item">Fallback Risk<strong id="state-meta-fallback">—</strong></div>
+      </div>
+      <div class="status" id="state-render-status">Press a render button to draw telemetry-driven state.</div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const canvas = document.getElementById('state-render-canvas');
+      const ctx = canvas.getContext('2d');
+      const elSource = document.getElementById('state-render-source');
+      const elSession = document.getElementById('state-render-session');
+      const elEntropy = document.getElementById('state-meta-entropy');
+      const elDominance = document.getElementById('state-meta-dominance');
+      const elBranch = document.getElementById('state-meta-branch');
+      const elFallback = document.getElementById('state-meta-fallback');
+      const elStatus = document.getElementById('state-render-status');
+      const btnCurrent = document.getElementById('btn-current');
+      const btnPrev = document.getElementById('btn-prev');
+      const btnRefresh = document.getElementById('btn-refresh');
+
+      const CHAT_SESSION_ID_KEY = 'mykro_neural_chat_session_id';
+
+      function resolveSessionId() {
+        try {
+          const fromQuery = new URLSearchParams(window.location.search).get('session_id');
+          if (fromQuery) {
+            sessionStorage.setItem(CHAT_SESSION_ID_KEY, fromQuery);
+            return fromQuery;
+          }
+        } catch (_) {}
+        try {
+          const existing = sessionStorage.getItem(CHAT_SESSION_ID_KEY);
+          if (existing) return existing;
+        } catch (_) {}
+        return '';
+      }
+
+      const state = {
+        snapshot: null,
+        mode: 'current',
+        frame: 0,
+        startedAt: performance.now(),
+        width: 0,
+        height: 0,
+        sessionId: resolveSessionId(),
+      };
+
+      elSession.textContent = state.sessionId ? `session: ${state.sessionId}` : 'session: global-latest';
+
+      function clamp01(v) { return Math.max(0, Math.min(1, Number(v || 0))); }
+      function mulberry32(seed) {
+        let t = seed >>> 0;
+        return () => {
+          t += 0x6D2B79F5;
+          let z = Math.imul(t ^ (t >>> 15), t | 1);
+          z ^= z + Math.imul(z ^ (z >>> 7), z | 61);
+          return ((z ^ (z >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        state.width = Math.max(1, Math.floor(rect.width));
+        state.height = Math.max(1, Math.floor(rect.height));
+        canvas.width = Math.floor(state.width * dpr);
+        canvas.height = Math.floor(state.height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function setStatus(text, isError = false) {
+        elStatus.textContent = text;
+        elStatus.classList.toggle('error', Boolean(isError));
+      }
+
+      function setRenderButtonsEnabled(enabled, reason = '') {
+        [btnCurrent, btnPrev, btnRefresh].forEach((btn) => {
+          if (!btn) return;
+          btn.disabled = !enabled;
+          if (enabled) {
+            btn.removeAttribute('title');
+          } else if (reason) {
+            btn.title = reason;
+          }
+        });
+      }
+
+      async function fetchWithTimeout(url, timeoutMs) {
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+          return fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+        }
+
+        if (typeof AbortController === 'undefined') {
+          return fetch(url);
+        }
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          return await fetch(url, { signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      function updateMeta(snapshot, source, status = '') {
+        if (!snapshot) {
+          elSource.textContent = 'No snapshot loaded';
+          elSession.textContent = state.sessionId ? `session: ${state.sessionId}` : 'session: global-latest';
+          elEntropy.textContent = '—';
+          elDominance.textContent = '—';
+          elBranch.textContent = '—';
+          elFallback.textContent = '—';
+          setStatus(status || 'Press a render button to draw telemetry-driven state.');
+          return;
+        }
+        elSource.textContent = source === 'previous' ? 'Previous Generation State' : 'Current State';
+        elSession.textContent = `session: ${snapshot.session_id || 'unknown'}`;
+        elEntropy.textContent = clamp01(snapshot.entropy_proxy).toFixed(3);
+        elDominance.textContent = clamp01(snapshot.top_choice_dominance).toFixed(3);
+        elBranch.textContent = clamp01(snapshot.branch_spread).toFixed(3);
+        elFallback.textContent = clamp01(snapshot.fallback_proximity).toFixed(3);
+        setStatus(status || `generation ${snapshot.generation_id} · model ${snapshot.active_model}`);
+      }
+
+      async function fetchSnapshot(source, sessionId = state.sessionId) {
+        const primary = source === 'previous' ? '/api/state-renderer/previous' : '/api/state-renderer/current';
+        const fallback = source === 'previous' ? '/api/state_renderer/previous' : '/api/state_renderer/current';
+        const endpoints = [primary, fallback];
+        let lastError = null;
+        const missingRoutes = [];
+
+        for (const endpoint of endpoints) {
+          const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+          const url = `${endpoint}${query}`;
+          let resp;
+          try {
+            resp = await fetchWithTimeout(url, 10000);
+          } catch (err) {
+            throw new Error(`Renderer backend is offline or unreachable at ${endpoint}. ${err?.message || err}`);
+          }
+          const data = await resp.json().catch(() => ({}));
+          if (resp.ok) return data;
+          const reason = data.reason || data.error || `Renderer request failed (${resp.status})`;
+          lastError = new Error(`${endpoint} failed: ${reason}`);
+          if (resp.status === 404) {
+            missingRoutes.push(endpoint);
+            continue;
+          }
+          throw lastError;
+        }
+
+        if (missingRoutes.length === endpoints.length) {
+          throw new Error(`Renderer route is missing (${missingRoutes.join(' and ')})`);
+        }
+        throw lastError || new Error('Renderer request failed (404)');
+      }
+
+      async function renderMode(source) {
+        if (!state.sessionId) {
+          state.snapshot = null;
+          cancelAnimationFrame(state.frame);
+          ctx.clearRect(0, 0, state.width || 300, state.height || 200);
+          updateMeta(null, source, 'Missing session_id. Open renderer from Neural UI so the active chat session is passed.');
+          setStatus('Missing session_id. Open renderer from Neural UI so the active chat session is passed.', true);
+          return;
+        }
+        state.mode = source;
+        updateMeta(null, source, `Loading ${source} telemetry snapshot…`);
+        try {
+          let data = await fetchSnapshot(source, state.sessionId);
+
+          // Session-specific snapshot can legitimately be absent (for example when
+          // current traffic was recorded under a fallback session key). In that
+          // case, gracefully render the latest available snapshot instead of
+          // leaving the stage blank.
+          if ((!data.available || !data.snapshot) && state.sessionId) {
+            const latest = await fetchSnapshot(source, '');
+            if (latest.available && latest.snapshot) {
+              data = latest;
+              state.snapshot = latest.snapshot;
+              updateMeta(
+                latest.snapshot,
+                source,
+                `No ${source} snapshot for session ${state.sessionId}; showing latest available telemetry (${latest.snapshot.session_id || 'unknown'}).`
+              );
+              startLoop();
+              return;
+            }
+          }
+
+          if (!data.available || !data.snapshot) {
+            state.snapshot = null;
+            cancelAnimationFrame(state.frame);
+            ctx.clearRect(0, 0, state.width || 300, state.height || 200);
+            updateMeta(null, source, data.reason || 'No snapshot available for this mode.');
+            return;
+          }
+
+          state.snapshot = data.snapshot;
+          updateMeta(data.snapshot, source, `Telemetry source: ${data.snapshot.selected_route || 'unknown'} · seed ${data.snapshot.render_seed}`);
+          startLoop();
+        } catch (err) {
+          state.snapshot = null;
+          cancelAnimationFrame(state.frame);
+          updateMeta(null, source, `State render failed: ${err.message || err}`);
+          setStatus(`State render failed: ${err.message || err}`, true);
+        }
+      }
+
+      function draw(now) {
+        const w = state.width || canvas.clientWidth || 200;
+        const h = state.height || canvas.clientHeight || 120;
+        if (!state.snapshot) {
+          ctx.clearRect(0, 0, w, h);
+          return;
+        }
+
+        const s = state.snapshot;
+        const seed = Number(s.render_seed || 1) >>> 0;
+        const t = (now - state.startedAt) / 1000;
+
+        const entropy = clamp01(s.entropy_proxy);
+        const dominance = clamp01(s.top_choice_dominance);
+        const spread = clamp01(s.branch_spread);
+        const drift = clamp01(s.centroid_drift);
+        const memory = clamp01(s.memory_pressure);
+        const fallback = clamp01(s.fallback_proximity);
+        const danger = clamp01(s.danger_resemblance_score);
+        const tools = clamp01(s.tool_activity_intensity);
+        const rejected = Math.max(0, Number(s.rejected_branch_count || 0));
+
+        const hue = Math.round(190 - danger * 105 + fallback * 25);
+        const coreAlpha = 0.2 + dominance * 0.6;
+        const fogAlpha = 0.18 + entropy * 0.35 + memory * 0.15;
+        const turbulence = 10 + entropy * 38;
+        const lobeCount = 1 + Math.round(spread * 4);
+        const driftAngle = ((seed % 360) * Math.PI / 180) + t * (0.2 + drift * 0.8);
+        const driftX = Math.cos(driftAngle) * (6 + drift * 22);
+        const driftY = Math.sin(driftAngle) * (4 + drift * 18);
+
+        ctx.clearRect(0, 0, w, h);
+
+        const bg = ctx.createRadialGradient(w * 0.5, h * 0.55, 8, w * 0.5, h * 0.55, Math.max(w, h) * 0.7);
+        bg.addColorStop(0, `hsla(${hue}, 90%, 60%, ${0.2 + danger * 0.18})`);
+        bg.addColorStop(1, `hsla(${hue + 30}, 70%, 8%, 0.92)`);
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, w, h);
+
+        for (let i = 0; i < lobeCount; i += 1) {
+          const phase = (Math.PI * 2 * i) / lobeCount;
+          const cx = w * 0.5 + Math.cos(phase + t * 0.12) * (20 + spread * 30) + driftX * 0.35;
+          const cy = h * 0.52 + Math.sin(phase + t * 0.1) * (14 + spread * 20) + driftY * 0.35;
+          const radius = 24 + spread * 34 + (Math.sin(t * 0.7 + i) * turbulence * 0.12);
+          const plume = ctx.createRadialGradient(cx, cy, 2, cx, cy, radius);
+          plume.addColorStop(0, `hsla(${hue - 10}, 95%, 62%, ${fogAlpha})`);
+          plume.addColorStop(1, `hsla(${hue + 18}, 80%, 20%, 0)`);
+          ctx.fillStyle = plume;
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        const core = ctx.createRadialGradient(w * 0.5 + driftX * 0.1, h * 0.52 + driftY * 0.1, 1, w * 0.5, h * 0.52, 34 + dominance * 42);
+        core.addColorStop(0, `hsla(${hue - 24}, 100%, 88%, ${coreAlpha})`);
+        core.addColorStop(0.45, `hsla(${hue - 8}, 96%, 62%, ${coreAlpha * 0.8})`);
+        core.addColorStop(1, `hsla(${hue + 25}, 90%, 18%, 0)`);
+        ctx.fillStyle = core;
+        ctx.beginPath();
+        ctx.arc(w * 0.5, h * 0.52, 46 + dominance * 40, 0, Math.PI * 2);
+        ctx.fill();
+
+        const particles = 45 + Math.round(entropy * 60 + memory * 35);
+        for (let i = 0; i < particles; i += 1) {
+          const pr = mulberry32((seed + i * 7919) >>> 0);
+          const px0 = pr() * w;
+          const py0 = pr() * h;
+          const amp = 2 + entropy * 8;
+          const px = px0 + Math.sin(t * (0.6 + pr()) + i) * amp + driftX * 0.12;
+          const py = py0 + Math.cos(t * (0.5 + pr()) + i * 0.8) * amp + driftY * 0.12;
+          const rr = 0.5 + pr() * (1.1 + memory * 1.4);
+          const pa = 0.08 + pr() * (0.22 + entropy * 0.16);
+          ctx.fillStyle = `hsla(${hue - 6}, 100%, 80%, ${pa})`;
+          ctx.beginPath();
+          ctx.arc(px, py, rr, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        const wisps = Math.min(8, rejected);
+        for (let i = 0; i < wisps; i += 1) {
+          const pr = mulberry32((seed + 100000 + i * 3571) >>> 0);
+          const x = pr() * w;
+          const y = pr() * h;
+          const rw = 18 + pr() * 26;
+          const rh = 8 + pr() * 12;
+          ctx.strokeStyle = `hsla(${hue + 40}, 70%, 72%, ${0.1 + pr() * 0.16})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.ellipse(x + Math.sin(t + i) * 3, y + Math.cos(t * 0.8 + i) * 2, rw, rh, pr() * Math.PI, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        if (fallback > 0.05 || danger > 0.05) {
+          const pulse = 0.2 + Math.abs(Math.sin(t * (2 + danger * 3))) * (0.25 + fallback * 0.4);
+          ctx.strokeStyle = `hsla(${20 + danger * 15}, 95%, 60%, ${pulse})`;
+          ctx.lineWidth = 1.5 + fallback * 1.8;
+          ctx.strokeRect(1, 1, w - 2, h - 2);
+        }
+
+        const bursts = Math.round(tools * 5);
+        for (let i = 0; i < bursts; i += 1) {
+          const angle = ((seed + i * 73) % 360) * Math.PI / 180;
+          const bx = w * 0.5 + Math.cos(angle + t * 1.4) * (14 + i * 8);
+          const by = h * 0.52 + Math.sin(angle + t * 1.2) * (12 + i * 6);
+          const rad = 3 + Math.abs(Math.sin(t * 2.4 + i)) * (4 + tools * 8);
+          ctx.strokeStyle = `hsla(${hue - 35}, 100%, 75%, ${0.14 + tools * 0.35})`;
+          ctx.beginPath();
+          ctx.arc(bx, by, rad, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        state.frame = requestAnimationFrame(draw);
+      }
+
+      function startLoop() {
+        cancelAnimationFrame(state.frame);
+        state.startedAt = performance.now();
+        state.frame = requestAnimationFrame(draw);
+      }
+
+      btnCurrent.addEventListener('click', () => renderMode('current'));
+      btnPrev.addEventListener('click', () => renderMode('previous'));
+      btnRefresh.addEventListener('click', () => renderMode(state.mode || 'current'));
+      document.getElementById('btn-open-neural').addEventListener('click', () => {
+        const query = state.sessionId ? `?session_id=${encodeURIComponent(state.sessionId)}` : '';
+        window.open(`/${query}`, '_blank', 'noopener');
+      });
+
+      window.addEventListener('resize', resize);
+      resize();
+      if (!state.sessionId) {
+        setRenderButtonsEnabled(false, 'Disabled: renderer needs an active Neural UI session_id.');
+        setStatus('Missing session_id. Open renderer from Neural UI so the active chat session is passed.', true);
+      } else {
+        setRenderButtonsEnabled(true);
+      }
+      renderMode('current');
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+# Runtime dependencies. The canonical list is gui_flask/requirements.txt.
+-r gui_flask/requirements.txt
