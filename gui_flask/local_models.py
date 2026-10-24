@@ -50,17 +50,20 @@ _DEFER = "defer"
 SETUP_HELP = """\
 MYKRO did not find a local model it can use yet.
 
-Run MYKRO again after one of these is available on this PC:
+A normal launch starts an installed local server for you: Ollama, LM Studio's
+local server, Jan, or llama-server with a .gguf already on disk. It waits
+until that endpoint answers, then saves it. MYKRO does not download weights.
 
-  • Ollama listening on http://127.0.0.1:11434
-  • LM Studio's local server on http://127.0.0.1:1234
+This window is the --setup override, for picking a specific model yourself.
+
+  • Ollama on http://127.0.0.1:11434
+  • LM Studio on http://127.0.0.1:1234
   • Jan or another OpenAI-compatible server on http://127.0.0.1:1337 or :8000
   • llama.cpp server (llama-server) on http://127.0.0.1:8080
   • A .gguf file in the repository model folder, %USERPROFILE%\\models,
     the LM Studio models folder, or %LOCALAPPDATA%\\MYKRO\\models
 
 MYKRO stays on this machine. It does not ask for a cloud API key.
-Launch MYKRO.exe --setup to choose a model after you start one.
 """
 
 
@@ -318,6 +321,43 @@ def discover_local_models(
     return discovery
 
 
+_PREFERRED_MODEL_TOKENS = (
+    "coder",
+    "qwen",
+    "llama",
+    "mistral",
+    "phi",
+    "gemma",
+    "deepseek",
+)
+_LOW_VALUE_MODEL_TOKENS = ("embed", "embedding", "whisper", "tts")
+
+
+def pick_best_model(models: list[DiscoveredModel]) -> DiscoveredModel:
+    """Prefer a chat model that is already listed. Earlier probes win ties."""
+    if not models:
+        raise ValueError("no models to choose from")
+
+    def score(pair: tuple[int, DiscoveredModel]) -> tuple[int, int]:
+        index, model = pair
+        name = model.model_name.casefold()
+        value = 0
+        for token in _PREFERRED_MODEL_TOKENS:
+            if token in name:
+                value += 10
+        for token in _LOW_VALUE_MODEL_TOKENS:
+            if token in name:
+                value -= 25
+        return (value, -index)
+
+    return max(enumerate(models), key=score)[1]
+
+
+def configured_endpoint(endpoint: str) -> bool:
+    text = str(endpoint or "").strip()
+    return bool(text) and text not in _UNCONFIGURED_ENDPOINTS
+
+
 def _load_config(path: Path) -> JsonObject:
     if not path.exists():
         return {}
@@ -566,6 +606,7 @@ def run_first_time_setup(
     force: bool = False,
     discover: Callable[[], Discovery] | None = None,
     chooser: Callable[[Discovery], DiscoveredModel | None | str] | None = None,
+    autoconfig: Callable[[Path], str] | None = None,
 ) -> str:
     """Ask once, save the choice, and leave an existing working config in place.
 
@@ -573,7 +614,23 @@ def run_first_time_setup(
     """
     config = _load_config(config_path)
     if not needs_setup(config, force=force):
+        if not force and discover is None and chooser is None:
+            try:
+                from gui_flask.launch_autoconfig import revive_saved_backend
+            except ImportError:
+                from launch_autoconfig import revive_saved_backend
+            try:
+                revive_saved_backend(config_path)
+            except Exception:
+                print("MYKRO could not restart the saved local model server.")
         return "skipped"
+    if not force and discover is None and chooser is None:
+        try:
+            from gui_flask.launch_autoconfig import launch_autoconfig
+        except ImportError:
+            from launch_autoconfig import launch_autoconfig
+        autoconfig = launch_autoconfig if autoconfig is None else autoconfig
+        return autoconfig(config_path)
     discovery = (discover or discover_local_models)()
     decision = (chooser or default_chooser)(discovery)
     if decision == _DEFER:
@@ -630,6 +687,16 @@ def run_self_check() -> int:
             import orchestrator_tk  # noqa: F401
     except Exception as exc:
         errors.append(f"orchestrator import failed: {exc}")
+
+    try:
+        try:
+            import gui_flask.launch_autoconfig  # noqa: F401
+            import gui_flask.win_control  # noqa: F401
+        except ImportError:
+            import launch_autoconfig  # noqa: F401
+            import win_control  # noqa: F401
+    except Exception as exc:
+        errors.append(f"launch import failed: {exc}")
 
     try:
         sample = discover_local_models(opener=lambda _url, _timeout: None, gguf_roots=[])

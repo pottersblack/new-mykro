@@ -30,6 +30,29 @@ try:
 except ImportError:  # imported as gui_flask.desktop_agent
     from gui_flask.paths import is_under_blocked_dir
 
+try:
+    from win_control import (
+        SW_MAXIMIZE,
+        SW_MINIMIZE,
+        WindowControl,
+        WindowQuery,
+        WindowRecord,
+        point_in_window,
+        select_window,
+        usable_window_rect,
+    )
+except ImportError:  # imported as gui_flask.desktop_agent
+    from gui_flask.win_control import (
+        SW_MAXIMIZE,
+        SW_MINIMIZE,
+        WindowControl,
+        WindowQuery,
+        WindowRecord,
+        point_in_window,
+        select_window,
+        usable_window_rect,
+    )
+
 # Third-party imports (conditionally available)
 try:
     import pyautogui
@@ -60,10 +83,6 @@ try:
 except ImportError:
     pynput_keyboard = None  # type: ignore[assignment]
     HAS_PYNPUT = False
-
-# Windows-specific imports for window management
-import ctypes
-import ctypes.wintypes
 
 
 # ---------------------------------------------------------------------------
@@ -156,17 +175,43 @@ class Action:
 class ScreenReader:
     """Captures screenshots, performs OCR, and enumerates windows."""
 
-    def __init__(self, tesseract_path=None):
+    def __init__(self, tesseract_path=None, windows: WindowControl | None = None):
         if tesseract_path and HAS_OCR and pytesseract is not None:
             pytesseract.pytesseract.tesseract_cmd = tesseract_path
+        self.windows = windows
+
+    def _windows(self) -> WindowControl:
+        if self.windows is None:
+            self.windows = WindowControl()
+        return self.windows
 
     def capture_screenshot(self, region=None):
-        """Take a screenshot. Returns PIL Image or None."""
+        """Take a screenshot. Returns PIL Image or None.
+
+        ``region`` is ``(left, top, right, bottom)`` in virtual-screen pixels.
+        Pillow's all-screens grab keeps monitors that sit left of the primary.
+        """
+        if region is not None:
+            try:
+                left, top, right, bottom = (int(v) for v in region)
+            except (TypeError, ValueError):
+                left = top = right = bottom = 0
+            if right > left and bottom > top:
+                try:
+                    from PIL import ImageGrab
+
+                    return ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+                except Exception:
+                    if HAS_PYAUTOGUI and pyautogui is not None:
+                        try:
+                            return pyautogui.screenshot(region=(left, top, right - left, bottom - top))
+                        except Exception:
+                            return None
+                    return None
         if not HAS_PYAUTOGUI or pyautogui is None:
             return None
         try:
-            img = pyautogui.screenshot(region=region)
-            return img
+            return pyautogui.screenshot()
         except Exception:
             return None
 
@@ -189,38 +234,21 @@ class ScreenReader:
             return f"(OCR error: {e})"
 
     def get_window_list(self):
-        """Enumerate visible windows via Win32 API. Returns list of dicts."""
+        """Enumerate visible windows. Each dict includes title, class, pid, and bounds."""
         windows = []
         try:
-            EnumWindows = ctypes.windll.user32.EnumWindows
-            IsWindowVisible = ctypes.windll.user32.IsWindowVisible
-            GetWindowTextW = ctypes.windll.user32.GetWindowTextW
-            GetWindowTextLengthW = ctypes.windll.user32.GetWindowTextLengthW
-            GetWindowRect = ctypes.windll.user32.GetWindowRect
-
-            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
-
-            def callback(hwnd, _) -> bool:
-                if IsWindowVisible(hwnd):
-                    length = GetWindowTextLengthW(hwnd)
-                    if length > 0:
-                        buf = ctypes.create_unicode_buffer(length + 1)
-                        GetWindowTextW(hwnd, buf, length + 1)
-                        title = buf.value
-                        if title.strip():
-                            rect = ctypes.wintypes.RECT()
-                            GetWindowRect(hwnd, ctypes.byref(rect))
-                            windows.append({
-                                'title': title,
-                                'hwnd': hwnd,
-                                'rect': {
-                                    'left': rect.left, 'top': rect.top,
-                                    'right': rect.right, 'bottom': rect.bottom
-                                }
-                            })
-                return True
-
-            EnumWindows(WNDENUMPROC(callback), 0)
+            for record in self._windows().list_windows():
+                windows.append({
+                    'title': record.title,
+                    'class_name': record.class_name,
+                    'pid': record.pid,
+                    'hwnd': record.hwnd,
+                    'minimized': record.minimized,
+                    'rect': {
+                        'left': record.left, 'top': record.top,
+                        'right': record.right, 'bottom': record.bottom,
+                    },
+                })
         except Exception:
             pass
         return windows
@@ -228,46 +256,63 @@ class ScreenReader:
     def get_active_window(self):
         """Get the currently focused window."""
         try:
-            hwnd = ctypes.windll.user32.GetForegroundWindow()
-            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-            buf = ctypes.create_unicode_buffer(length + 1)
-            ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
-            rect = ctypes.wintypes.RECT()
-            ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
-            return {
-                'title': buf.value,
-                'hwnd': hwnd,
-                'rect': {
-                    'left': rect.left, 'top': rect.top,
-                    'right': rect.right, 'bottom': rect.bottom
-                }
-            }
+            record = self._windows().foreground()
         except Exception:
+            record = None
+        if record is None:
             return {'title': 'Unknown', 'hwnd': 0, 'rect': {}}
+        return {
+            'title': record.title,
+            'class_name': record.class_name,
+            'pid': record.pid,
+            'hwnd': record.hwnd,
+            'minimized': record.minimized,
+            'rect': {
+                'left': record.left, 'top': record.top,
+                'right': record.right, 'bottom': record.bottom,
+            },
+        }
 
     def capture_state(self, do_ocr=True):
         """Capture full desktop state: screenshot + OCR + windows."""
         img = self.capture_screenshot()
         ocr_text = ""
-        if do_ocr and img:
-            # OCR only the active window region for performance
+        if do_ocr:
             active = self.get_active_window()
-            r = active.get('rect', {})
-            if r.get('right', 0) > r.get('left', 0) and r.get('bottom', 0) > r.get('top', 0):
-                try:
-                    cropped = img.crop((r['left'], r['top'], r['right'], r['bottom']))
-                    ocr_text = self.ocr_screenshot(cropped)
-                except Exception:
-                    ocr_text = self.ocr_screenshot(img)
-            else:
-                ocr_text = self.ocr_screenshot(img)
+            window_img = None
+            rect = active.get('rect') or {}
+            if active.get('hwnd'):
+                record = WindowRecord(
+                    hwnd=int(active.get('hwnd') or 0),
+                    title=str(active.get('title') or ''),
+                    class_name=str(active.get('class_name') or ''),
+                    pid=int(active.get('pid') or 0),
+                    left=int(rect.get('left') or 0),
+                    top=int(rect.get('top') or 0),
+                    right=int(rect.get('right') or 0),
+                    bottom=int(rect.get('bottom') or 0),
+                    minimized=bool(active.get('minimized')),
+                )
+                bounds = usable_window_rect(record)
+                if bounds is not None:
+                    window_img = self.capture_screenshot(region=bounds)
+            target = window_img or img
+            if target is not None:
+                ocr_text = self.ocr_screenshot(target)
+                if img is None:
+                    img = target
 
         screen_w, screen_h = 1920, 1080
-        if HAS_PYAUTOGUI and pyautogui is not None:
-            try:
-                screen_w, screen_h = pyautogui.size()
-            except Exception:
-                pass
+        try:
+            bounds = self._windows().virtual_screen()
+            screen_w = max(1, bounds.right - bounds.left)
+            screen_h = max(1, bounds.bottom - bounds.top)
+        except Exception:
+            if HAS_PYAUTOGUI and pyautogui is not None:
+                try:
+                    screen_w, screen_h = pyautogui.size()
+                except Exception:
+                    pass
 
         return {
             'screenshot': img,
@@ -332,7 +377,7 @@ class ActionExecutor:
         Path("C:/Program Files (x86)"),
     ]
 
-    def __init__(self, safe_dirs=None, blocked_dirs=None, command_timeout=30, behavior_tuning=None):
+    def __init__(self, safe_dirs=None, blocked_dirs=None, command_timeout=30, behavior_tuning=None, windows=None, abort=None):
         if blocked_dirs:
             self.BLOCKED_DIRS = [Path(d) for d in blocked_dirs]
         self.safe_dirs = [Path(d) for d in (safe_dirs or [])]
@@ -341,6 +386,77 @@ class ActionExecutor:
         self.behavior_tuning = behavior_tuning or {}
         self._program_cache: list[dict] = []
         self._program_cache_ts = 0.0
+        self._window_control = windows
+        self._abort = abort
+        try:
+            self._focus_attempts = max(1, int(self.behavior_tuning.get("focus_attempts", 4)))
+        except (TypeError, ValueError):
+            self._focus_attempts = 4
+        try:
+            self._focus_backoff = max(0.0, float(self.behavior_tuning.get("focus_backoff_secs", 0.15)))
+        except (TypeError, ValueError):
+            self._focus_backoff = 0.15
+
+    def bind_abort(self, flag) -> None:
+        """Stop retries and typing when ``flag`` is set. DesktopAgent passes its stop event."""
+        self._abort = flag
+        if self._window_control is not None:
+            self._window_control.abort = flag
+
+    def _aborted(self) -> bool:
+        flag = self._abort
+        if flag is None:
+            return False
+        is_set = getattr(flag, "is_set", None)
+        if callable(is_set):
+            return bool(is_set())
+        return bool(flag)
+
+    def _windows(self) -> WindowControl:
+        if self._window_control is None:
+            self._window_control = WindowControl(
+                attempts=self._focus_attempts,
+                backoff=self._focus_backoff,
+                abort=self._abort,
+            )
+        else:
+            self._window_control.abort = self._abort
+        return self._window_control
+
+    def _query_from_params(self, params: dict) -> WindowQuery | None:
+        title = str(params.get("window") or params.get("title") or "").strip()
+        class_name = str(params.get("class_name") or params.get("class") or "").strip()
+        try:
+            pid = int(params.get("pid") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        try:
+            hwnd = int(params.get("hwnd") or 0)
+        except (TypeError, ValueError):
+            hwnd = 0
+        query = WindowQuery(title=title, class_name=class_name, pid=pid, hwnd=hwnd)
+        if not query.specified:
+            return None
+        return query
+
+    def _blocked_reason(self) -> str | None:
+        if self._aborted():
+            return "Aborted"
+        try:
+            if self._windows().secure_desktop():
+                return "Windows secure desktop is active (UAC). Automation paused."
+        except Exception:
+            return None
+        return None
+
+    def _focus_target(self, params: dict) -> tuple[bool, str, object]:
+        blocked = self._blocked_reason()
+        if blocked:
+            return False, blocked, None
+        query = self._query_from_params(params)
+        if query is None:
+            return True, "", None
+        return self._windows().focus(query)
 
     def _check_path_safety(self, filepath, *args, **kwargs):
         """Validate a file path is safe to operate on."""
@@ -359,6 +475,8 @@ class ActionExecutor:
 
     def execute(self, action: Action, screen_reader: 'Optional[ScreenReader]' = None):
         """Execute a single approved action. Returns (success, result_msg)."""
+        if self._aborted():
+            return False, "Aborted"
         handlers = {
             ActionType.MOUSE_CLICK: self._do_mouse_click,
             ActionType.MOUSE_MOVE: self._do_mouse_move,
@@ -388,26 +506,55 @@ class ActionExecutor:
         except Exception as e:
             return False, f"Execution error: {e}"
 
-    @staticmethod
-    def _clamp_coords(x: int, y: int, margin: int = 5) -> tuple[int, int]:
-        """Keep coordinates out of screen corners to avoid pyautogui failsafe."""
-        if HAS_PYAUTOGUI and pyautogui is not None:
-            try:
-                sw, sh = pyautogui.size()
-                x = max(margin, min(x, sw - margin))
-                y = max(margin, min(y, sh - margin))
-            except Exception:
-                pass
-        return x, y
+    def _clamp_coords(self, x: int, y: int, margin: int = 2) -> tuple[int, int]:
+        """Keep coordinates on the virtual desktop, including monitors left of the primary."""
+        try:
+            from win_control import clamp_point
+        except ImportError:
+            from gui_flask.win_control import clamp_point
+        try:
+            return clamp_point(x, y, self._windows().virtual_screen(), margin=margin)
+        except Exception:
+            return int(x), int(y)
 
     def _do_mouse_click(self, params: dict, _sr: Any = None):
+        blocked = self._blocked_reason()
+        if blocked:
+            return False, blocked
+        x = int(params.get('x', 0))
+        y = int(params.get('y', 0))
+        query = self._query_from_params(params)
+        record = None
+        if query is not None:
+            ok, message, record = self._windows().focus(query)
+            if not ok or record is None:
+                return False, message
+            if not point_in_window(x, y, record):
+                return False, (
+                    f"Click ({x},{y}) is outside '{record.title}'. "
+                    "Refusing to click the wrong window."
+                )
         if not HAS_PYAUTOGUI or pyautogui is None:
             return False, "pyautogui not available"
-        x, y = self._clamp_coords(int(params.get('x', 0)), int(params.get('y', 0)))
+        x, y = self._clamp_coords(x, y)
+        if record is not None and not point_in_window(x, y, record, margin=2):
+            return False, f"Click ({x},{y}) is outside '{record.title}'."
         button = params.get('button', 'left')
         clicks = int(params.get('clicks', 1))
-        pyautogui.click(x, y, clicks=clicks, button=button)
-        return True, f"Clicked ({x},{y}) button={button}"
+        last = "click failed"
+        for attempt in range(2):
+            if self._aborted():
+                return False, "Aborted"
+            try:
+                pyautogui.click(x, y, clicks=clicks, button=button)
+                return True, f"Clicked ({x},{y}) button={button}"
+            except Exception as exc:
+                last = f"Click failed: {exc}"
+                if query is not None:
+                    self._windows().focus(query)
+                self._windows().sleeper(self._focus_backoff)
+                del attempt
+        return False, last
 
     def _do_mouse_move(self, params: dict, _sr: Any = None):
         if not HAS_PYAUTOGUI or pyautogui is None:
@@ -441,8 +588,9 @@ class ActionExecutor:
         return True, f"Scrolled {direction} {clicks} clicks at ({x},{y})"
 
     def _do_keyboard_type(self, params: dict, sr: Any = None):
-        if not HAS_PYAUTOGUI or pyautogui is None:
-            return False, "pyautogui not available"
+        blocked = self._blocked_reason()
+        if blocked:
+            return False, blocked
         text = str(params.get('text', ''))
         interval = float(params.get('interval', 0.02))
         per_paragraph = bool(
@@ -458,13 +606,15 @@ class ActionExecutor:
             params.get('paragraph_pause_secs', self.behavior_tuning.get('paragraph_pause_secs', 0.15))
         )
 
-        # Auto-focus target window before typing (prevents typing into wrong window)
-        target_window = params.get('window', '')
-        if target_window:
-            focus_ok, focus_msg = self._do_window_focus({'title': target_window}, sr)
-            if not focus_ok:
-                return False, f"Cannot focus target window '{target_window}': {focus_msg}"
-            time.sleep(0.3)  # let window activate
+        # Focus and confirm the foreground before any keystrokes.
+        target_window = str(params.get('window') or params.get('title') or '')
+        focus_ok, focus_msg, focused = self._focus_target(params)
+        if not focus_ok:
+            return False, f"Cannot focus target window '{target_window}': {focus_msg}" if target_window else focus_msg
+        if focused is not None and verify_window and not self._windows().foreground_matches(focused):
+            return False, f"Foreground window does not match '{target_window or focused.title}'"
+        if not HAS_PYAUTOGUI or pyautogui is None:
+            return False, "pyautogui not available"
 
         if not per_paragraph:
             if text.isascii():
@@ -478,19 +628,23 @@ class ActionExecutor:
             return True, "Nothing to type"
 
         for idx, para in enumerate(paragraphs, start=1):
-            if target_window:
-                focus_ok, focus_msg = self._do_window_focus({'title': target_window}, sr)
+            if self._aborted():
+                return False, "Aborted"
+            if target_window or self._query_from_params(params) is not None:
+                focus_ok, focus_msg, focused = self._focus_target(params)
                 if not focus_ok:
                     return False, f"Paragraph {idx}: cannot focus target window '{target_window}': {focus_msg}"
-                time.sleep(0.2)
-
-                if verify_window and sr is not None:
-                    active = sr.get_active_window() or {}
-                    active_title = str(active.get('title', ''))
-                    if target_window.lower() not in active_title.lower():
+                if verify_window and focused is not None and not self._windows().foreground_matches(focused):
+                    # One recovery attempt, then stop instead of typing into a different window.
+                    focus_ok, focus_msg, focused = self._focus_target(params)
+                    if (
+                        not focus_ok
+                        or focused is None
+                        or not self._windows().foreground_matches(focused)
+                    ):
                         return False, (
-                            f"Paragraph {idx}: active window mismatch. "
-                            f"Expected contains '{target_window}', got '{active_title}'"
+                            f"Paragraph {idx}: foreground changed. "
+                            f"Refusing to type into the wrong window."
                         )
 
             if screenshot_each and sr is not None:
@@ -501,6 +655,8 @@ class ActionExecutor:
                 pyautogui.typewrite(para, interval=interval)
             else:
                 pyautogui.write(para)
+            if self._aborted():
+                return False, "Aborted"
 
             if idx < len(paragraphs):
                 pyautogui.press('enter')
@@ -513,42 +669,29 @@ class ActionExecutor:
         )
 
     def _do_keyboard_hotkey(self, params: dict, sr: Any = None):
-        if not HAS_PYAUTOGUI or pyautogui is None:
-            return False, "pyautogui not available"
+        blocked = self._blocked_reason()
+        if blocked:
+            return False, blocked
         keys = params.get('keys', [])
         if isinstance(keys, str):
             keys = [k.strip() for k in keys.split('+')]
-        # Auto-focus target window before hotkey
-        target_window = params.get('window', '')
-        if target_window:
-            focus_ok, focus_msg = self._do_window_focus({'title': target_window}, sr)
-            if not focus_ok:
-                return False, f"Cannot focus target window '{target_window}': {focus_msg}"
-            time.sleep(0.3)
+        target_window = str(params.get('window') or params.get('title') or '')
+        focus_ok, focus_msg, _focused = self._focus_target(params)
+        if not focus_ok:
+            return False, f"Cannot focus target window '{target_window}': {focus_msg}" if target_window else focus_msg
+        if not HAS_PYAUTOGUI or pyautogui is None:
+            return False, "pyautogui not available"
         pyautogui.hotkey(*keys)
         return True, f"Hotkey: {'+'.join(keys)}"
 
     def _do_window_focus(self, params: dict, _sr: Any = None):
-        title = params.get('title', '')
-        if not title:
+        query = self._query_from_params(params)
+        if query is None:
             return False, "Missing window title"
-        try:
-            hwnd = ctypes.windll.user32.FindWindowW(None, title)
-            if not hwnd:
-                # Fallback: partial title search over visible windows
-                sr = ScreenReader()
-                title_l = str(title).lower()
-                for w in sr.get_window_list():
-                    w_title = str(w.get('title', ''))
-                    if title_l in w_title.lower():
-                        hwnd = w.get('hwnd', 0)
-                        break
-            if hwnd:
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-                return True, f"Focused: {title}"
-            return False, f"Window not found: {title}"
-        except Exception as e:
-            return False, f"Focus error: {e}"
+        _ok, message, _record = self._windows().focus(query)
+        if self._aborted():
+            return False, "Aborted"
+        return _ok, message
 
     @staticmethod
     def _normalize_name(text: str) -> str:
@@ -585,14 +728,11 @@ class ActionExecutor:
         return None
 
     @staticmethod
-    def _focus_hwnd(hwnd: int) -> bool:
+    def _focus_hwnd(self, hwnd: int) -> bool:
         if not hwnd:
             return False
-        try:
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
-            return True
-        except Exception:
-            return False
+        ok, _message, _record = self._windows().focus(WindowQuery(hwnd=int(hwnd)))
+        return ok
 
     @staticmethod
     def _get_running_processes() -> list:
@@ -643,29 +783,12 @@ class ActionExecutor:
         return best if best_score > 0 else None
 
     @staticmethod
-    def _hwnd_for_pid(pid: int) -> int:
-        """Return the first visible top-level window HWND owned by *pid*, or 0."""
+    def _hwnd_for_pid(self, pid: int) -> int:
+        """Return the best visible top-level window HWND owned by *pid*, or 0."""
         if not pid:
             return 0
-        result = [0]
-        EnumWindowsProc = ctypes.WINFUNCTYPE(
-            ctypes.c_bool,
-            ctypes.POINTER(ctypes.c_int),
-            ctypes.POINTER(ctypes.c_int),
-        )
-
-        def _cb(hwnd, _lp) -> bool:
-            if not ctypes.windll.user32.IsWindowVisible(hwnd):
-                return True
-            proc_id = ctypes.c_ulong(0)
-            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
-            if proc_id.value == pid:
-                result[0] = hwnd
-                return False  # stop enumeration
-            return True
-
-        ctypes.windll.user32.EnumWindows(EnumWindowsProc(_cb), 0)
-        return result[0]
+        record = select_window(self._windows().list_windows(), WindowQuery(pid=int(pid)))
+        return int(record.hwnd) if record is not None else 0
 
     def _known_paths_for_query(self, query: str) -> list[str]:
         canonical = self._canonical_app_key(query)
@@ -831,26 +954,24 @@ class ActionExecutor:
             return False, f"Launch error: {e}"
 
     def _do_window_minimize(self, params: dict, _sr: Any = None):
-        title = params.get('title', '')
-        try:
-            hwnd = ctypes.windll.user32.FindWindowW(None, title)
-            if hwnd:
-                ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
-                return True, f"Minimized: {title}"
-            return False, f"Window not found: {title}"
-        except Exception as e:
-            return False, f"Minimize error: {e}"
+        query = self._query_from_params(params)
+        if query is None:
+            return False, "Missing window title"
+        ok, message = self._windows().show(query, SW_MINIMIZE)
+        if not ok:
+            return False, message
+        title = query.title or str(query.hwnd or query.pid)
+        return True, f"Minimized: {title}"
 
     def _do_window_maximize(self, params: dict, _sr: Any = None):
-        title = params.get('title', '')
-        try:
-            hwnd = ctypes.windll.user32.FindWindowW(None, title)
-            if hwnd:
-                ctypes.windll.user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
-                return True, f"Maximized: {title}"
-            return False, f"Window not found: {title}"
-        except Exception as e:
-            return False, f"Maximize error: {e}"
+        query = self._query_from_params(params)
+        if query is None:
+            return False, "Missing window title"
+        ok, message = self._windows().show(query, SW_MAXIMIZE)
+        if not ok:
+            return False, message
+        title = query.title or str(query.hwnd or query.pid)
+        return True, f"Maximized: {title}"
 
     def _do_run_command(self, params: dict, _sr: Any = None):
         command = params.get('command', '')
@@ -925,26 +1046,27 @@ class ActionExecutor:
         except Exception as e:
             return False, f"Delete error: {e}"
 
-    def _do_screenshot(self, _params: dict, sr: Any = None):
+    def _do_screenshot(self, params: dict, sr: Any = None):
         """Capture screenshot + run OCR so the next prompt has fresh screen text."""
+        if self._aborted():
+            return False, "Aborted"
         if sr is None:
             return False, "Screenshot unavailable"
-        img = sr.capture_screenshot()
+        region = None
+        query = self._query_from_params(params or {})
+        if query is not None:
+            ok, message, record = self._windows().focus(query)
+            if not ok or record is None:
+                return False, message
+            region = usable_window_rect(record)
+            if region is None:
+                return False, f"'{record.title}' has no visible bounds to capture."
+        img = sr.capture_screenshot(region=region)
         if img is None:
             return False, "Screenshot unavailable"
         ocr_text = ""
         if HAS_OCR:
-            # OCR the active window region only for speed
-            active = sr.get_active_window()
-            r = active.get('rect', {})
-            if r.get('right', 0) > r.get('left', 0) and r.get('bottom', 0) > r.get('top', 0):
-                try:
-                    cropped = img.crop((r['left'], r['top'], r['right'], r['bottom']))
-                    ocr_text = sr.ocr_screenshot(cropped)
-                except Exception:
-                    ocr_text = sr.ocr_screenshot(img)
-            else:
-                ocr_text = sr.ocr_screenshot(img)
+            ocr_text = sr.ocr_screenshot(img)
         # Store for use in next _build_prompt call
         self._last_ocr_text = ocr_text[:4000]
         result_msg = "Screenshot captured"
@@ -1214,6 +1336,7 @@ class DesktopAgent:
         self.approval_events: dict = {}  # id -> threading.Event
         self.approval_results: dict = {} # id -> bool (True=approved)
         self._stop_event = threading.Event()
+        self.executor.bind_abort(self._stop_event)
         self._running = False
         self._current_goal = ""
         self._mode = "command"  # "goal" or "command"

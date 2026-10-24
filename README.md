@@ -6,15 +6,10 @@ MYKRO is a local-first AI harness. It lets a model that is already on your PC in
 
 1. Download `MYKRO.exe` from the [latest release](https://github.com/pottersblack/new-mykro/releases), or from the `MYKRO-windows` artifact on a successful [Windows exe](https://github.com/pottersblack/new-mykro/actions/workflows/mykro-windows.yml) build.
 2. Double-click `MYKRO.exe`. Python does not need to be installed.
-3. Pick a local model. The first launch looks for:
-   - Ollama on `http://127.0.0.1:11434`
-   - LM Studio on `http://127.0.0.1:1234`
-   - Jan or another OpenAI-compatible server on `http://127.0.0.1:1337` or `:8000`
-   - llama.cpp server on `http://127.0.0.1:8080` or `:8081`
-   - `.gguf` files in the repository `model` folder, `%USERPROFILE%\models`, the LM Studio models folder, or `%LOCALAPPDATA%\MYKRO\models`
-4. If nothing is running yet, MYKRO shows what to start on this PC. Run `MYKRO.exe --setup` after a model is available.
+3. On launch MYKRO uses a local model that is already answering. If none is, it starts one that is already installed, in this order: Ollama, LM Studio's local server, llama-server with a `.gguf` already on disk, Jan, then the LM Studio app. It waits until the endpoint answers and saves `%LOCALAPPDATA%\MYKRO\config.json`. It does not download weights and it does not ask for a cloud API key.
+4. If nothing usable is installed, a first-run window offers to start or install the best local option. `MYKRO.exe --setup` is still there when you want to pick a specific model yourself.
 
-The choice is saved under `%LOCALAPPDATA%\MYKRO\config.json`. A working config is left in place on later launches.
+Later launches leave a working config in place and restart that same local server if it is not answering.
 
 ```powershell
 MYKRO.exe --version
