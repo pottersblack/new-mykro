@@ -218,8 +218,29 @@ class ConfigManager:
 
     def _default(self) -> JsonObject:
         return {
-            "model": {"endpoint": "", "type": "http"},
+            "model": {"endpoint": "", "type": "http", "backend": "", "model_name": ""},
             "servers": [],
+            "startup": {
+                "server_mode": "all",
+                "auto_start_web_ui": True,
+                "auto_start_household": True,
+                "autoconfig_on_launch": True,
+                "autofix_gateway_deps": True,
+                "rewrite_invalid_config": True,
+                "household_port": 5001,
+            },
+            "gateway": {
+                "host": "127.0.0.1",
+                "port": 8090,
+                "agent_max_iterations": 25,
+                "auto_approve_reads": True,
+            },
+            "setup": {
+                "completed": False,
+                "use_external_backend": False,
+                "requires_cloud_api_key": False,
+                "backend": "",
+            },
         }
 
     def _backup_corrupt_text(self, raw_text: str) -> None:
@@ -5386,6 +5407,9 @@ class AppGUI(tk.Tk):
                     return content
             return "Gateway responded but no assistant content was returned."
         except (OSError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError):
+            local_answer = AppGUI._chat_via_saved_local_model(self, prompt, cfg_mgr, timeout_secs)
+            if local_answer:
+                return local_answer
             # Gateway failed — try web_ui /api/completion first so fallback
             # still participates in state-renderer producer/consumer contract.
             try:
@@ -5461,6 +5485,43 @@ class AppGUI(tk.Tk):
                     pass
 
             return "Chat unavailable: gateway is not running and no local llama-server responded. Start a server first (▶ Start button)."
+
+    def _chat_via_saved_local_model(self, prompt: str, cfg_mgr: Any, timeout_secs: float) -> str | None:
+        """Talk to the Ollama-style endpoint saved by setup when the gateway is down."""
+        if cfg_mgr is None:
+            return None
+        model = _normalize_dict(cfg_mgr.get("model", {}))
+        endpoint = str(model.get("endpoint") or "").strip()
+        backend = str(model.get("backend") or "").strip().lower()
+        model_name = str(model.get("model_name") or "").strip() or "local"
+        from urllib.parse import urlparse
+
+        host = (urlparse(endpoint).hostname or "").lower()
+        if "/chat/completions" not in endpoint or host not in {"127.0.0.1", "localhost", "::1"}:
+            return None
+        if backend and backend not in {"ollama", "lmstudio", "jan", "llamacpp", "openai"}:
+            return None
+        payload = json.dumps(
+            {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=min(timeout_secs, 180.0)) as resp:
+                data = _normalize_dict(json.load(resp))
+        except (OSError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        answer = _extract_gateway_answer(data)
+        if isinstance(answer, str) and answer.strip():
+            return answer.strip()
+        return None
 
     def _configured_servers(self) -> list[ServerConfig]:
         return _normalize_server_configs(self.hub.config.get("servers", []))
@@ -6176,11 +6237,11 @@ def main() -> None:
     try:
         from paths import config_file as _config_file
         from paths import memory_file as _memory_file
-        from local_models import dispatch_argv, run_first_time_setup
+        from local_models import adopt_package_model, dispatch_argv, run_first_time_setup
     except ImportError:
         from gui_flask.paths import config_file as _config_file
         from gui_flask.paths import memory_file as _memory_file
-        from gui_flask.local_models import dispatch_argv, run_first_time_setup
+        from gui_flask.local_models import adopt_package_model, dispatch_argv, run_first_time_setup
 
     cli_code = dispatch_argv(sys.argv)
     if cli_code is not None:
@@ -6189,6 +6250,10 @@ def main() -> None:
     workspace = Path(__file__).resolve().parent
     config_path = _config_file()
     memory_path = _memory_file()
+    try:
+        adopt_package_model(config_path)
+    except Exception:
+        logger.exception("Could not copy the saved model config")
     if os.environ.get("MYKRO_SKIP_FIRST_RUN", "").strip() != "1":
         try:
             run_first_time_setup(config_path, force="--setup" in sys.argv)
@@ -6336,7 +6401,13 @@ def main() -> None:
             "rewrite_invalid_config": True,
         }
         for key, value in defaults.items():
-            if key not in startup_cfg:
+            current = startup_cfg.get(key)
+            if key == "server_mode":
+                if str(current or "").strip().lower() in {"", "off", "none", "disabled"}:
+                    startup_cfg[key] = "all"
+                    mutated = True
+                continue
+            if current is not True:
                 startup_cfg[key] = value
                 mutated = True
 

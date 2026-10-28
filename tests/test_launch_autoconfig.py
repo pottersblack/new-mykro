@@ -82,7 +82,9 @@ def test_installed_ollama_is_started_and_saved_without_a_download(tmp_path: Path
     assert saved["model"]["model_name"] == "llama3:8b"
     assert saved["model"]["endpoint"] == "http://127.0.0.1:11434/v1/chat/completions"
     assert saved["setup"]["requires_cloud_api_key"] is False
-    assert saved["setup"]["use_external_backend"] is True
+    assert saved["setup"]["use_external_backend"] is False
+    assert saved["startup"]["autoconfig_on_launch"] is True
+    assert saved["gateway"]["large_model"]["model_name"] == "llama3:8b"
     assert "api_key" not in saved
     assert "api_key" not in saved["model"]
 

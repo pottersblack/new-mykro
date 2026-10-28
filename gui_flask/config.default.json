@@ -9,12 +9,12 @@
   },
   "servers": [],
   "startup": {
-    "server_mode": "off",
-    "auto_start_web_ui": false,
-    "auto_start_household": false,
-    "autoconfig_on_launch": false,
-    "autofix_gateway_deps": false,
-    "rewrite_invalid_config": false,
+    "server_mode": "all",
+    "auto_start_web_ui": true,
+    "auto_start_household": true,
+    "autoconfig_on_launch": true,
+    "autofix_gateway_deps": true,
+    "rewrite_invalid_config": true,
     "household_port": 5001
   },
   "gateway": {

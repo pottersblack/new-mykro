@@ -49,7 +49,9 @@ The download is an Ollama model stored on this computer. Setup does not ask for 
 
 The build is one file: `dist\MYKRO.exe` on Windows and `dist/MYKRO` on Linux. There is no folder of pieces to join, and there is no separate build step. The same command compiles it with PyInstaller and then launches that file.
 
-A source checkout saves the choice in `gui_flask\config.json` (gitignored). The built program saves `%LOCALAPPDATA%\MYKRO\config.json` on Windows and `~/.local/share/MYKRO/config.json` on Linux. Later launches reuse that model and start Ollama again if its port is down.
+Setup writes a complete config to `%LOCALAPPDATA%\MYKRO\config.json` on Windows and `~/.local/share/MYKRO/config.json` on Linux, and keeps the same file at `gui_flask\config.json` for a source checkout. That config turns `autoconfig_on_launch` on, stores the Ollama endpoint and the model you picked, and points the MYKRO gateway at that model. The next launch creates a missing config instead of leaving autoconfig off, starts Ollama if its port is down, and chat uses that model without the Start button.
+
+A fresh launch with no config file creates one with autoconfig enabled. GitHub Releases still has no download.
 
 ```powershell
 .\dist\MYKRO.exe --version

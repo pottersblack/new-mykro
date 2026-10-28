@@ -411,8 +411,140 @@ def needs_setup(config: JsonObject, *, force: bool = False) -> bool:
     return True
 
 
-def apply_choice(config_path: Path, model: DiscoveredModel) -> None:
-    """Save the picked local model. No API key field is written."""
+def repair_startup_policy(startup: JsonObject) -> bool:
+    """Turn on launch autoconfig. A missing or disabled policy is not left off."""
+    changed = False
+    desired: dict[str, Any] = {
+        "server_mode": "all",
+        "auto_start_web_ui": True,
+        "auto_start_household": True,
+        "autoconfig_on_launch": True,
+        "autofix_gateway_deps": True,
+        "rewrite_invalid_config": True,
+    }
+    for key, value in desired.items():
+        current = startup.get(key)
+        if key == "server_mode":
+            if str(current or "").strip().lower() in {"", "off", "none", "disabled"}:
+                startup[key] = "all"
+                changed = True
+            continue
+        if current is not True:
+            startup[key] = value
+            changed = True
+    startup.setdefault("household_port", 5001)
+    return changed
+
+
+def _gateway_python(explicit: str | None = None) -> str | None:
+    """Python that can run gateway.py. The frozen MYKRO program is not that."""
+    root = package_dir().parent
+    candidates: list[str] = []
+    if explicit:
+        candidates.append(explicit)
+    candidates.extend(
+        [
+            str(root / ".venv" / "Scripts" / "python.exe"),
+            str(root / ".venv" / "bin" / "python"),
+            sys.executable,
+        ]
+    )
+    for item in candidates:
+        path = Path(item)
+        name = path.name.lower()
+        if name.startswith("mykro") or "python" not in name:
+            continue
+        try:
+            if path.is_file():
+                return str(path)
+        except OSError:
+            continue
+    return None
+
+
+def _merge_gateway_server(servers: list[Any], python_exe: str, cwd: Path) -> list[Any]:
+    entry = {
+        "name": "MYKRO Gateway",
+        "exe": python_exe,
+        "args": ["gateway.py"],
+        "cwd": str(cwd),
+    }
+    merged: list[Any] = []
+    replaced = False
+    for item in servers:
+        if isinstance(item, dict) and str(item.get("name") or "").strip().lower() == "mykro gateway":
+            combined = {str(key): value for key, value in item.items()}
+            combined.update(entry)
+            merged.append(combined)
+            replaced = True
+        else:
+            merged.append(item)
+    if not replaced:
+        merged.append(entry)
+    return merged
+
+
+def adopt_package_model(config_path: Path) -> None:
+    """Copy a configured package config into an empty user config.
+
+    The built program reads %LOCALAPPDATA%\\MYKRO\\config.json. If that file
+    was seeded before setup saved the model, the model already written next
+    to the source is copied across.
+    """
+    package = package_dir() / "config.json"
+    try:
+        if not package.is_file() or package.resolve() == config_path.resolve():
+            return
+        current = _load_config(config_path) if config_path.exists() else {}
+        current_endpoint = str(_as_dict(current.get("model")).get("endpoint") or "").strip()
+        if current_endpoint and current_endpoint not in _UNCONFIGURED_ENDPOINTS:
+            return
+        saved = _load_config(package)
+        saved_endpoint = str(_as_dict(saved.get("model")).get("endpoint") or "").strip()
+        if not is_loopback_url(saved_endpoint) or "/chat/completions" not in saved_endpoint:
+            return
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(package.read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError:
+        return
+
+
+def _publish_live_config(config_path: Path) -> None:
+    """Keep the package config and %LOCALAPPDATA%\\MYKRO\\config.json in step.
+
+    Setup writes one of those files. The desktop app and gateway.py read the
+    other. Temporary test configs are left where they are.
+    """
+    try:
+        source = config_path.resolve()
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    targets = [data_dir() / "config.json", package_dir() / "config.json"]
+    live = []
+    for target in targets:
+        try:
+            live.append(target.resolve())
+        except OSError:
+            continue
+    if source not in live:
+        return
+    for target in targets:
+        try:
+            if target.resolve() == source:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        except OSError:
+            continue
+
+
+def apply_choice(config_path: Path, model: DiscoveredModel, *, python_executable: str | None = None) -> None:
+    """Save the picked local model and the gateway settings chat needs.
+
+    No API key field is written. Autoconfig stays on so the next launch
+    creates anything that is still missing.
+    """
     config = _load_config(config_path)
     model_cfg = _as_dict(config.get("model"))
     setup = _as_dict(config.get("setup"))
@@ -424,24 +556,49 @@ def apply_choice(config_path: Path, model: DiscoveredModel) -> None:
     model_cfg.pop("api_key", None)
     model_cfg.pop("openai_api_key", None)
 
-    external = model.backend in LOCAL_BACKENDS and bool(model.endpoint)
+    external = model.backend in LOCAL_BACKENDS and bool(model.endpoint) and is_loopback_url(model.endpoint)
     if external:
         model_cfg["type"] = "openai"
         model_cfg["endpoint"] = model.endpoint
         model_cfg["model_path"] = model.model_path
-        startup["server_mode"] = "off"
-        startup["autoconfig_on_launch"] = False
-        startup["auto_start_web_ui"] = False
-        startup["auto_start_household"] = False
-        startup["autofix_gateway_deps"] = False
+        model_cfg["default_server"] = "MYKRO Gateway"
+        chat = {
+            "name": model.model_name or "local",
+            "endpoint": model.endpoint,
+            "model_name": model.model_name,
+            "max_tokens": 2048,
+            "context_size": 8192,
+        }
+        gateway = _as_dict(config.get("gateway"))
+        gateway["host"] = str(gateway.get("host") or "127.0.0.1")
+        gateway["port"] = gateway.get("port") or 8090
+        gateway["agent_max_iterations"] = gateway.get("agent_max_iterations") or 25
+        gateway["auto_approve_reads"] = True if "auto_approve_reads" not in gateway else gateway["auto_approve_reads"]
+        gateway["large_model"] = dict(chat)
+        small = dict(chat)
+        small["max_tokens"] = 1024
+        small["context_size"] = 4096
+        gateway["small_model"] = small
+        config["gateway"] = gateway
+        endpoints = _as_dict(config.get("endpoints"))
+        endpoints["mykro-large"] = {"endpoint": model.endpoint, "context_size": 8192, "max_tokens": 2048}
+        endpoints["mykro-small"] = {"endpoint": model.endpoint, "context_size": 4096, "max_tokens": 1024}
+        endpoints["mykro-auto"] = {"endpoint": model.endpoint, "context_size": 8192, "max_tokens": 2048}
+        config["endpoints"] = endpoints
+        python_exe = _gateway_python(python_executable)
+        if python_exe:
+            servers = config.get("servers")
+            if not isinstance(servers, list):
+                servers = []
+            config["servers"] = _merge_gateway_server(servers, python_exe, package_dir())
     else:
         model_cfg["type"] = "gguf"
         model_cfg["endpoint"] = ""
         model_cfg["model_path"] = model.model_path
-        startup["autoconfig_on_launch"] = False
 
+    repair_startup_policy(startup)
     setup["completed"] = True
-    setup["use_external_backend"] = bool(external)
+    setup["use_external_backend"] = False
     setup["requires_cloud_api_key"] = False
     setup["backend"] = model.backend
     config.pop("api_key", None)
@@ -450,6 +607,7 @@ def apply_choice(config_path: Path, model: DiscoveredModel) -> None:
     config["setup"] = setup
     config["startup"] = startup
     _save_config(config_path, config)
+    _publish_live_config(config_path)
 
 
 def mark_continue_without_model(config_path: Path) -> None:
