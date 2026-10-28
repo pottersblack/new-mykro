@@ -218,8 +218,29 @@ class ConfigManager:
 
     def _default(self) -> JsonObject:
         return {
-            "model": {"endpoint": "", "type": "http"},
+            "model": {"endpoint": "", "type": "http", "backend": "", "model_name": ""},
             "servers": [],
+            "startup": {
+                "server_mode": "all",
+                "auto_start_web_ui": True,
+                "auto_start_household": True,
+                "autoconfig_on_launch": True,
+                "autofix_gateway_deps": True,
+                "rewrite_invalid_config": True,
+                "household_port": 5001,
+            },
+            "gateway": {
+                "host": "127.0.0.1",
+                "port": 8090,
+                "agent_max_iterations": 25,
+                "auto_approve_reads": True,
+            },
+            "setup": {
+                "completed": False,
+                "use_external_backend": False,
+                "requires_cloud_api_key": False,
+                "backend": "",
+            },
         }
 
     def _backup_corrupt_text(self, raw_text: str) -> None:
@@ -296,6 +317,20 @@ class ConfigManager:
                 node = cast(JsonObject, next_node)
             node[path[-1]] = value
             self._write(root)
+
+    def reload(self) -> None:
+        """Read the file from disk even when the mtime looks unchanged."""
+        if not self.path.is_file():
+            return
+        try:
+            loaded = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return
+        if not isinstance(loaded, dict):
+            return
+        with self.lock:
+            self._data = {str(key): value for key, value in loaded.items()}
+            self._mtime_ns = self._read_mtime_ns()
 
     def reload_if_changed(self) -> bool:
         """Reload config.json when it changed externally. Returns True when data changed."""
@@ -5386,6 +5421,9 @@ class AppGUI(tk.Tk):
                     return content
             return "Gateway responded but no assistant content was returned."
         except (OSError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError):
+            local_answer = AppGUI._chat_via_saved_local_model(self, prompt, cfg_mgr, timeout_secs)
+            if local_answer:
+                return local_answer
             # Gateway failed — try web_ui /api/completion first so fallback
             # still participates in state-renderer producer/consumer contract.
             try:
@@ -5461,6 +5499,43 @@ class AppGUI(tk.Tk):
                     pass
 
             return "Chat unavailable: gateway is not running and no local llama-server responded. Start a server first (▶ Start button)."
+
+    def _chat_via_saved_local_model(self, prompt: str, cfg_mgr: Any, timeout_secs: float) -> str | None:
+        """Talk to the Ollama-style endpoint saved by setup when the gateway is down."""
+        if cfg_mgr is None:
+            return None
+        model = _normalize_dict(cfg_mgr.get("model", {}))
+        endpoint = str(model.get("endpoint") or "").strip()
+        backend = str(model.get("backend") or "").strip().lower()
+        model_name = str(model.get("model_name") or "").strip() or "local"
+        from urllib.parse import urlparse
+
+        host = (urlparse(endpoint).hostname or "").lower()
+        if "/chat/completions" not in endpoint or host not in {"127.0.0.1", "localhost", "::1"}:
+            return None
+        if backend and backend not in {"ollama", "lmstudio", "jan", "llamacpp", "openai"}:
+            return None
+        payload = json.dumps(
+            {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            endpoint,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=min(timeout_secs, 180.0)) as resp:
+                data = _normalize_dict(json.load(resp))
+        except (OSError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+        answer = _extract_gateway_answer(data)
+        if isinstance(answer, str) and answer.strip():
+            return answer.strip()
+        return None
 
     def _configured_servers(self) -> list[ServerConfig]:
         return _normalize_server_configs(self.hub.config.get("servers", []))
@@ -6176,11 +6251,11 @@ def main() -> None:
     try:
         from paths import config_file as _config_file
         from paths import memory_file as _memory_file
-        from local_models import dispatch_argv, run_first_time_setup
+        from local_models import adopt_package_model, dispatch_argv, run_first_time_setup
     except ImportError:
         from gui_flask.paths import config_file as _config_file
         from gui_flask.paths import memory_file as _memory_file
-        from gui_flask.local_models import dispatch_argv, run_first_time_setup
+        from gui_flask.local_models import adopt_package_model, dispatch_argv, run_first_time_setup
 
     cli_code = dispatch_argv(sys.argv)
     if cli_code is not None:
@@ -6189,6 +6264,10 @@ def main() -> None:
     workspace = Path(__file__).resolve().parent
     config_path = _config_file()
     memory_path = _memory_file()
+    try:
+        adopt_package_model(config_path)
+    except Exception:
+        logger.exception("Could not copy the saved model config")
     if os.environ.get("MYKRO_SKIP_FIRST_RUN", "").strip() != "1":
         try:
             run_first_time_setup(config_path, force="--setup" in sys.argv)
@@ -6336,7 +6415,13 @@ def main() -> None:
             "rewrite_invalid_config": True,
         }
         for key, value in defaults.items():
-            if key not in startup_cfg:
+            current = startup_cfg.get(key)
+            if key == "server_mode":
+                if str(current or "").strip().lower() in {"", "off", "none", "disabled"}:
+                    startup_cfg[key] = "all"
+                    mutated = True
+                continue
+            if current is not True:
                 startup_cfg[key] = value
                 mutated = True
 
@@ -6475,11 +6560,8 @@ def main() -> None:
         return False, f"{server_name} did not open port {port} within {int(timeout)}s.", True
 
     def _run_autoconfig_phase(startup_cfg: JsonObject) -> bool:
-        if not bool(startup_cfg.get("autoconfig_on_launch", True)):
-            _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "skipped", "autoconfig_on_launch is disabled")
-            return True
-
-        _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "starting", "autoconfig running")
+        startup_cfg["autoconfig_on_launch"] = True
+        _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "starting", "autoconfig_on_launch enabled")
         result = run_autoconfig(config_path=config_path, python_executable=sys.executable)
         if not bool(result.get("ok")):
             detail = str(result.get("message") or "Autoconfig failed.")
@@ -6508,6 +6590,18 @@ def main() -> None:
     def _auto_establish_runtime() -> None:
         """Boot model/backend/web dependencies with deterministic autoconfig-first phases."""
         _emit_startup_message("Boot sequence: deterministic startup phases engaged…")
+
+        # Rewrite the user config before any phase can treat autoconfig as off.
+        try:
+            try:
+                from boot_config import boot_config_file
+            except ImportError:
+                from gui_flask.boot_config import boot_config_file
+            for line in boot_config_file(Path(hub.config.path)):
+                _emit_startup_message(line)
+            hub.config.reload()
+        except Exception:
+            logger.exception("Could not enable autoconfig in the user config")
 
         # Phase 0: load/repair startup policy defaults
         startup_cfg = _resolve_startup_policy()
@@ -6570,16 +6664,9 @@ def main() -> None:
         except (TypeError, ValueError):
             gw_port = 8090
 
-        setup_cfg = _normalize_dict(hub.config.get("setup", {}))
-        external_backend = bool(setup_cfg.get("use_external_backend"))
         gateway_server = _get_server_config_by_name("MYKRO Gateway")
-        if external_backend or gateway_server is None:
-            reason = (
-                "selected local model does not use the MYKRO gateway"
-                if external_backend
-                else "MYKRO Gateway is not configured"
-            )
-            _emit_startup_phase(4, "start gateway", "skipped", reason)
+        if gateway_server is None:
+            _emit_startup_phase(4, "start gateway", "skipped", "MYKRO Gateway is not configured")
         elif not _is_tcp_port_open(gw_host, gw_port):
             _emit_startup_phase(4, "start gateway", "starting", f"gateway not reachable on {gw_host}:{gw_port}; attempting start")
             ok, msg, started = _ensure_configured_server_running("MYKRO Gateway", startup_cfg)

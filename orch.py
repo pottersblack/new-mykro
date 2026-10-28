@@ -7,13 +7,12 @@ smoke-tested headlessly.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
 from gui_flask.local_models import dispatch_argv
-from gui_flask.paths import config_file, ensure_data_dirs, is_frozen, resource_root
+from gui_flask.paths import config_file, ensure_data_dirs, resource_root
 
 
 def _resolve_gui_dir() -> Path:
@@ -31,47 +30,20 @@ GUI_DIR = _resolve_gui_dir()
 
 
 def _ensure_orch_autostart_defaults() -> None:
-    """Make a source checkout start the full local stack.
+    """Heal the user config before the window opens, including a frozen exe.
 
-    A frozen exe keeps the startup policy saved by first-run setup. Set
-    MYKRO_DISABLE_ORCH_AUTOSTART=1 to skip this rewrite in a source checkout.
-    An external local backend (Ollama, LM Studio, llama.cpp server) is also
-    left alone.
+    ``setup.completed`` true does not keep autoconfig off. Set
+    MYKRO_DISABLE_ORCH_AUTOSTART=1 to skip this rewrite.
     """
-    if is_frozen():
-        return
     if os.environ.get("MYKRO_DISABLE_ORCH_AUTOSTART", "").strip() == "1":
         return
-
-    config_path = config_file()
-    if not config_path.exists():
-        return
-
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return
-
-    if not isinstance(data, dict):
-        return
-
-    setup = data.get("setup")
-    if isinstance(setup, dict) and setup.get("use_external_backend"):
-        return
-
-    startup = data.get("startup")
-    if not isinstance(startup, dict):
-        startup = {}
-
-    startup["server_mode"] = "all"
-    startup["auto_start_web_ui"] = True
-    startup["auto_start_household"] = True
-    startup.setdefault("household_port", 5001)
-    data["startup"] = startup
-
+        from gui_flask.boot_config import boot_config_file
+    except ImportError:
+        from boot_config import boot_config_file
     try:
-        config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except OSError:
+        boot_config_file(config_file())
+    except Exception:
         return
 
 

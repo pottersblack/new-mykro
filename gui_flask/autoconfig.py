@@ -246,6 +246,52 @@ def _merge_servers(existing_servers: list[ServerConfig], managed_targets: list[S
     return sorted(deduped, key=lambda cfg: rank.get(str(cfg.get("name") or "").strip().lower(), 999))
 
 
+def _configure_saved_local_model(
+    cfg_path: Path,
+    model_cfg: JsonObject,
+    *,
+    python_executable: str | None,
+) -> AutoconfigResult:
+    """Wire a saved Ollama-style endpoint into the gateway without a .gguf file."""
+    try:
+        from gui_flask.local_models import DiscoveredModel, apply_choice
+    except ImportError:
+        from local_models import DiscoveredModel, apply_choice
+
+    endpoint = str(model_cfg.get("endpoint") or "").strip()
+    model_name = str(model_cfg.get("model_name") or "").strip() or "local"
+    backend = str(model_cfg.get("backend") or "").strip().lower() or "ollama"
+    apply_choice(
+        cfg_path,
+        DiscoveredModel(
+            backend=backend,
+            label=str(model_cfg.get("label") or f"{backend} · {model_name}"),
+            endpoint=endpoint,
+            model_name=model_name,
+            model_path=str(model_cfg.get("model_path") or ""),
+        ),
+        python_executable=python_executable,
+    )
+    updated = _load_json(cfg_path)
+    return {
+        "ok": True,
+        "message": "Local model configured.",
+        "config": updated,
+        "found_models": ["local"],
+        "default_server": "MYKRO Gateway",
+        "llama_exe": "",
+        "repairs_applied": ["local-chat"],
+        "startup_summary": {
+            "config_repaired": True,
+            "servers_discovered": len(_normalize_servers(updated.get("servers", []))),
+            "endpoints_registered": len(_normalize_dict(updated.get("endpoints", {}))),
+            "dependency_installs_performed": 0,
+            "services_started": 0,
+            "degraded_items": [],
+        },
+    }
+
+
 def run_autoconfig(config_path: str | Path, python_executable: str | None = None) -> AutoconfigResult:
     cfg_path = Path(config_path)
     gui_dir = cfg_path.parent
@@ -263,6 +309,23 @@ def run_autoconfig(config_path: str | Path, python_executable: str | None = None
     existing_routing = _normalize_dict(config.get("routing", {}))
     existing_ui = _normalize_dict(config.get("ui", {}))
     existing_safety = _normalize_dict(config.get("safety", {}))
+
+    configured_endpoint = str(existing_model.get("endpoint") or "").strip()
+    configured_backend = str(existing_model.get("backend") or "").strip().lower()
+    if configured_endpoint.startswith("http://127.0.0.1") or configured_endpoint.startswith("http://localhost"):
+        if "/chat/completions" in configured_endpoint and configured_backend in {
+            "ollama",
+            "lmstudio",
+            "jan",
+            "llamacpp",
+            "openai",
+            "",
+        }:
+            return _configure_saved_local_model(
+                cfg_path,
+                existing_model,
+                python_executable=python_executable,
+            )
 
     large_model, small_model = _detect_qwen_models(model_dir)
 

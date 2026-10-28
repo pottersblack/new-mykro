@@ -1021,10 +1021,24 @@ _DOTENV_PATH = Path(WORKSPACE_ROOT) / ".env"
 
 
 def load_config() -> dict:
+    """Read the same user config boot uses, then the package file."""
+    candidates = []
     try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        try:
+            from gui_flask.paths import config_file
+        except ImportError:
+            from paths import config_file
+        candidates.append(config_file())
+    except Exception:
+        pass
+    candidates.append(CONFIG_PATH)
+    for path in candidates:
+        try:
+            if path.is_file():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return {}
 
 
 def resolve_workspace_root(requested_root: str | None) -> str:
@@ -1447,13 +1461,41 @@ async def get_http_client() -> httpx.AsyncClient:
     return client
 
 
+def _endpoint_health_url(endpoint: str) -> str:
+    """Ollama and other OpenAI chat URLs are healthy at their own root, not /health."""
+    text = str(endpoint or "").strip().rstrip("/")
+    marker = "/v1/chat/completions"
+    if marker in text:
+        base = text.split(marker, 1)[0].rstrip("/")
+        if base.endswith(":11434") or "://127.0.0.1:11434" in base or "://localhost:11434" in base:
+            return base + "/api/tags"
+        return base + "/v1/models"
+    return text + "/health"
+
+
+def _openai_model_id() -> str:
+    """Model tag saved by setup. Ollama rejects a request that says model=default."""
+    loaded = load_config()
+    model = loaded.get("model") if isinstance(loaded.get("model"), dict) else {}
+    name = str(model.get("model_name") or "").strip()
+    if name:
+        return name
+    gateway = loaded.get("gateway") if isinstance(loaded.get("gateway"), dict) else {}
+    for key in ("large_model", "small_model"):
+        sub = gateway.get(key) if isinstance(gateway.get(key), dict) else {}
+        name = str(sub.get("model_name") or "").strip()
+        if name:
+            return name
+    return "default"
+
+
 async def _is_endpoint_healthy(endpoint: str | None) -> bool:
     """Best-effort endpoint readiness probe."""
     if not endpoint:
         return False
     client = await get_http_client()
     try:
-        resp = await client.get(f"{endpoint}/health", timeout=3.0)
+        resp = await client.get(_endpoint_health_url(endpoint), timeout=3.0)
         return resp.status_code == 200
     except httpx.HTTPError:
         return False
@@ -1951,7 +1993,7 @@ async def call_llama_server(
     if "/chat/completions" in endpoint:
         # OpenAI-compatible format for OpenClaw
         payload = {
-            "model": "default",
+            "model": _openai_model_id(),
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -1999,7 +2041,7 @@ async def stream_llama_server(
     if "/chat/completions" in endpoint:
         # OpenAI-compatible format for OpenClaw
         payload = {
-            "model": "default",
+            "model": _openai_model_id(),
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": temperature,

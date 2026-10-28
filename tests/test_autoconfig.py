@@ -58,6 +58,47 @@ def _mk_base_config(root: Path, cfg_path: Path) -> None:
     cfg_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def test_autoconfig_wires_a_saved_ollama_model_without_a_gguf() -> None:
+    tmp, _root, _model_dir, cfg = _mk_workspace()
+    try:
+        cfg.write_text(
+            json.dumps(
+                {
+                    "model": {
+                        "backend": "ollama",
+                        "model_name": "qwen2.5-coder:1.5b",
+                        "endpoint": "http://127.0.0.1:11434/v1/chat/completions",
+                        "type": "openai",
+                    },
+                    "startup": {
+                        "autoconfig_on_launch": False,
+                        "server_mode": "off",
+                        "autofix_gateway_deps": False,
+                    },
+                    "setup": {"use_external_backend": True, "requires_cloud_api_key": False},
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = run_autoconfig(cfg, python_executable=sys.executable)
+        assert result["ok"] is True
+        assert result["message"] == "Local model configured."
+        saved = json.loads(cfg.read_text(encoding="utf-8"))
+        assert saved["startup"]["autoconfig_on_launch"] is True
+        assert saved["startup"]["server_mode"] == "all"
+        assert saved["startup"]["autofix_gateway_deps"] is True
+        assert saved["setup"]["use_external_backend"] is False
+        assert saved["setup"]["requires_cloud_api_key"] is False
+        assert saved["model"]["model_name"] == "qwen2.5-coder:1.5b"
+        assert saved["gateway"]["large_model"]["endpoint"] == "http://127.0.0.1:11434/v1/chat/completions"
+        assert saved["gateway"]["large_model"]["model_name"] == "qwen2.5-coder:1.5b"
+        assert any(item.get("name") == "MYKRO Gateway" for item in saved["servers"])
+        assert "api_key" not in saved
+        assert "api_key" not in saved["model"]
+    finally:
+        tmp.cleanup()
+
+
 def test_autoconfig_detects_small_variant_without_mislabeling_large() -> None:
     tmp, root, model_dir, cfg = _mk_workspace()
     try:

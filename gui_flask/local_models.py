@@ -50,17 +50,23 @@ _DEFER = "defer"
 SETUP_HELP = """\
 MYKRO did not find a local model it can use yet.
 
-Run MYKRO again after one of these is available on this PC:
+A normal launch starts an installed local server for you: Ollama, LM Studio's
+local server, Jan, or llama-server with a .gguf already on disk. It waits
+until that endpoint answers, then saves it. This picker does not download weights.
 
-  • Ollama listening on http://127.0.0.1:11434
-  • LM Studio's local server on http://127.0.0.1:1234
+To download a local model and start MYKRO in one step, run setup.ps1 on Windows
+or bash setup.sh on Linux, then choose A, B, C, or D.
+
+This window is the --setup override, for picking a specific model yourself.
+
+  • Ollama on http://127.0.0.1:11434
+  • LM Studio on http://127.0.0.1:1234
   • Jan or another OpenAI-compatible server on http://127.0.0.1:1337 or :8000
   • llama.cpp server (llama-server) on http://127.0.0.1:8080
   • A .gguf file in the repository model folder, %USERPROFILE%\\models,
     the LM Studio models folder, or %LOCALAPPDATA%\\MYKRO\\models
 
 MYKRO stays on this machine. It does not ask for a cloud API key.
-Launch MYKRO.exe --setup to choose a model after you start one.
 """
 
 
@@ -318,6 +324,43 @@ def discover_local_models(
     return discovery
 
 
+_PREFERRED_MODEL_TOKENS = (
+    "coder",
+    "qwen",
+    "llama",
+    "mistral",
+    "phi",
+    "gemma",
+    "deepseek",
+)
+_LOW_VALUE_MODEL_TOKENS = ("embed", "embedding", "whisper", "tts")
+
+
+def pick_best_model(models: list[DiscoveredModel]) -> DiscoveredModel:
+    """Prefer a chat model that is already listed. Earlier probes win ties."""
+    if not models:
+        raise ValueError("no models to choose from")
+
+    def score(pair: tuple[int, DiscoveredModel]) -> tuple[int, int]:
+        index, model = pair
+        name = model.model_name.casefold()
+        value = 0
+        for token in _PREFERRED_MODEL_TOKENS:
+            if token in name:
+                value += 10
+        for token in _LOW_VALUE_MODEL_TOKENS:
+            if token in name:
+                value -= 25
+        return (value, -index)
+
+    return max(enumerate(models), key=score)[1]
+
+
+def configured_endpoint(endpoint: str) -> bool:
+    text = str(endpoint or "").strip()
+    return bool(text) and text not in _UNCONFIGURED_ENDPOINTS
+
+
 def _load_config(path: Path) -> JsonObject:
     if not path.exists():
         return {}
@@ -368,8 +411,147 @@ def needs_setup(config: JsonObject, *, force: bool = False) -> bool:
     return True
 
 
-def apply_choice(config_path: Path, model: DiscoveredModel) -> None:
-    """Save the picked local model. No API key field is written."""
+def repair_startup_policy(startup: JsonObject) -> bool:
+    """Turn on launch autoconfig. A missing or disabled policy is not left off."""
+    changed = False
+    desired: dict[str, Any] = {
+        "server_mode": "all",
+        "auto_start_web_ui": True,
+        "auto_start_household": True,
+        "autoconfig_on_launch": True,
+        "autofix_gateway_deps": True,
+        "rewrite_invalid_config": True,
+    }
+    for key, value in desired.items():
+        current = startup.get(key)
+        if key == "server_mode":
+            if str(current or "").strip().lower() in {"", "off", "none", "disabled"}:
+                startup[key] = "all"
+                changed = True
+            continue
+        if current is not True:
+            startup[key] = value
+            changed = True
+    startup.setdefault("household_port", 5001)
+    return changed
+
+
+def _gateway_python(explicit: str | None = None) -> str | None:
+    """Python that can run gateway.py. The frozen MYKRO program is not that."""
+    root = package_dir().parent
+    candidates: list[str] = []
+    if explicit:
+        candidates.append(explicit)
+    candidates.extend(
+        [
+            str(root / ".venv" / "Scripts" / "python.exe"),
+            str(root / ".venv" / "bin" / "python"),
+            sys.executable,
+        ]
+    )
+    for item in candidates:
+        path = Path(item)
+        name = path.name.lower()
+        if name.startswith("mykro") or "python" not in name:
+            continue
+        try:
+            if path.is_file():
+                return str(path)
+        except OSError:
+            continue
+    return None
+
+
+def _merge_named_server(servers: list[Any], entry: dict[str, Any]) -> list[Any]:
+    wanted = str(entry.get("name") or "").strip().lower()
+    merged: list[Any] = []
+    replaced = False
+    for item in servers:
+        if isinstance(item, dict) and str(item.get("name") or "").strip().lower() == wanted:
+            combined = {str(key): value for key, value in item.items()}
+            combined.update(entry)
+            merged.append(combined)
+            replaced = True
+        else:
+            merged.append(item)
+    if not replaced:
+        merged.append(entry)
+    return merged
+
+
+def _merge_gateway_server(servers: list[Any], python_exe: str, cwd: Path) -> list[Any]:
+    return _merge_named_server(
+        servers,
+        {
+            "name": "MYKRO Gateway",
+            "exe": python_exe,
+            "args": ["gateway.py"],
+            "cwd": str(cwd),
+        },
+    )
+
+
+def adopt_package_model(config_path: Path) -> None:
+    """Copy a configured package config into an empty user config.
+
+    The built program reads %LOCALAPPDATA%\\MYKRO\\config.json. If that file
+    was seeded before setup saved the model, the model already written next
+    to the source is copied across.
+    """
+    package = package_dir() / "config.json"
+    try:
+        if not package.is_file() or package.resolve() == config_path.resolve():
+            return
+        current = _load_config(config_path) if config_path.exists() else {}
+        current_endpoint = str(_as_dict(current.get("model")).get("endpoint") or "").strip()
+        if current_endpoint and current_endpoint not in _UNCONFIGURED_ENDPOINTS:
+            return
+        saved = _load_config(package)
+        saved_endpoint = str(_as_dict(saved.get("model")).get("endpoint") or "").strip()
+        if not is_loopback_url(saved_endpoint) or "/chat/completions" not in saved_endpoint:
+            return
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(package.read_text(encoding="utf-8"), encoding="utf-8")
+    except OSError:
+        return
+
+
+def _publish_live_config(config_path: Path) -> None:
+    """Keep the package config and %LOCALAPPDATA%\\MYKRO\\config.json in step.
+
+    Setup writes one of those files. The desktop app and gateway.py read the
+    other. Temporary test configs are left where they are.
+    """
+    try:
+        source = config_path.resolve()
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    targets = [data_dir() / "config.json", package_dir() / "config.json"]
+    live = []
+    for target in targets:
+        try:
+            live.append(target.resolve())
+        except OSError:
+            continue
+    if source not in live:
+        return
+    for target in targets:
+        try:
+            if target.resolve() == source:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        except OSError:
+            continue
+
+
+def apply_choice(config_path: Path, model: DiscoveredModel, *, python_executable: str | None = None) -> None:
+    """Save the picked local model and the gateway settings chat needs.
+
+    No API key field is written. Autoconfig stays on so the next launch
+    creates anything that is still missing.
+    """
     config = _load_config(config_path)
     model_cfg = _as_dict(config.get("model"))
     setup = _as_dict(config.get("setup"))
@@ -381,24 +563,67 @@ def apply_choice(config_path: Path, model: DiscoveredModel) -> None:
     model_cfg.pop("api_key", None)
     model_cfg.pop("openai_api_key", None)
 
-    external = model.backend in LOCAL_BACKENDS and bool(model.endpoint)
+    external = model.backend in LOCAL_BACKENDS and bool(model.endpoint) and is_loopback_url(model.endpoint)
     if external:
         model_cfg["type"] = "openai"
         model_cfg["endpoint"] = model.endpoint
         model_cfg["model_path"] = model.model_path
-        startup["server_mode"] = "off"
-        startup["autoconfig_on_launch"] = False
-        startup["auto_start_web_ui"] = False
-        startup["auto_start_household"] = False
-        startup["autofix_gateway_deps"] = False
+        model_cfg["default_server"] = "MYKRO Gateway"
+        chat = {
+            "name": model.model_name or "local",
+            "endpoint": model.endpoint,
+            "model_name": model.model_name,
+            "max_tokens": 2048,
+            "context_size": 8192,
+        }
+        gateway = _as_dict(config.get("gateway"))
+        gateway["host"] = str(gateway.get("host") or "127.0.0.1")
+        gateway["port"] = gateway.get("port") or 8090
+        gateway["agent_max_iterations"] = gateway.get("agent_max_iterations") or 25
+        gateway["auto_approve_reads"] = True if "auto_approve_reads" not in gateway else gateway["auto_approve_reads"]
+        gateway["large_model"] = dict(chat)
+        small = dict(chat)
+        small["max_tokens"] = 1024
+        small["context_size"] = 4096
+        gateway["small_model"] = small
+        config["gateway"] = gateway
+        endpoints = _as_dict(config.get("endpoints"))
+        endpoints["mykro-large"] = {"endpoint": model.endpoint, "context_size": 8192, "max_tokens": 2048}
+        endpoints["mykro-small"] = {"endpoint": model.endpoint, "context_size": 4096, "max_tokens": 1024}
+        endpoints["mykro-auto"] = {"endpoint": model.endpoint, "context_size": 8192, "max_tokens": 2048}
+        config["endpoints"] = endpoints
+        servers = config.get("servers")
+        if not isinstance(servers, list):
+            servers = []
+        python_exe = _gateway_python(python_executable)
+        if python_exe:
+            servers = _merge_gateway_server(servers, python_exe, package_dir())
+        if model.backend == "ollama":
+            import shutil
+
+            try:
+                ollama_exe = shutil.which("ollama") or shutil.which("ollama.exe")
+            except (AttributeError, OSError):
+                ollama_exe = None
+            if ollama_exe:
+                servers = _merge_named_server(
+                    servers,
+                    {
+                        "name": "Ollama",
+                        "exe": ollama_exe,
+                        "args": ["serve"],
+                        "cwd": str(package_dir().parent),
+                    },
+                )
+        config["servers"] = servers
     else:
         model_cfg["type"] = "gguf"
         model_cfg["endpoint"] = ""
         model_cfg["model_path"] = model.model_path
-        startup["autoconfig_on_launch"] = False
 
+    repair_startup_policy(startup)
     setup["completed"] = True
-    setup["use_external_backend"] = bool(external)
+    setup["use_external_backend"] = False
     setup["requires_cloud_api_key"] = False
     setup["backend"] = model.backend
     config.pop("api_key", None)
@@ -407,6 +632,7 @@ def apply_choice(config_path: Path, model: DiscoveredModel) -> None:
     config["setup"] = setup
     config["startup"] = startup
     _save_config(config_path, config)
+    _publish_live_config(config_path)
 
 
 def mark_continue_without_model(config_path: Path) -> None:
@@ -566,6 +792,7 @@ def run_first_time_setup(
     force: bool = False,
     discover: Callable[[], Discovery] | None = None,
     chooser: Callable[[Discovery], DiscoveredModel | None | str] | None = None,
+    autoconfig: Callable[[Path], str] | None = None,
 ) -> str:
     """Ask once, save the choice, and leave an existing working config in place.
 
@@ -573,7 +800,23 @@ def run_first_time_setup(
     """
     config = _load_config(config_path)
     if not needs_setup(config, force=force):
+        if not force and discover is None and chooser is None:
+            try:
+                from gui_flask.launch_autoconfig import revive_saved_backend
+            except ImportError:
+                from launch_autoconfig import revive_saved_backend
+            try:
+                revive_saved_backend(config_path)
+            except Exception:
+                print("MYKRO could not restart the saved local model server.")
         return "skipped"
+    if not force and discover is None and chooser is None:
+        try:
+            from gui_flask.launch_autoconfig import launch_autoconfig
+        except ImportError:
+            from launch_autoconfig import launch_autoconfig
+        autoconfig = launch_autoconfig if autoconfig is None else autoconfig
+        return autoconfig(config_path)
     discovery = (discover or discover_local_models)()
     decision = (chooser or default_chooser)(discovery)
     if decision == _DEFER:
@@ -630,6 +873,22 @@ def run_self_check() -> int:
             import orchestrator_tk  # noqa: F401
     except Exception as exc:
         errors.append(f"orchestrator import failed: {exc}")
+
+    try:
+        try:
+            import gui_flask.boot_config  # noqa: F401
+            import gui_flask.launch_autoconfig  # noqa: F401
+            import gui_flask.linux_control  # noqa: F401
+            import gui_flask.setup_menu  # noqa: F401
+            import gui_flask.win_control  # noqa: F401
+        except ImportError:
+            import boot_config  # noqa: F401
+            import launch_autoconfig  # noqa: F401
+            import linux_control  # noqa: F401
+            import setup_menu  # noqa: F401
+            import win_control  # noqa: F401
+    except Exception as exc:
+        errors.append(f"launch import failed: {exc}")
 
     try:
         sample = discover_local_models(opener=lambda _url, _timeout: None, gguf_roots=[])

@@ -21,13 +21,20 @@ def test_ensure_dirs(tmp_path, monkeypatch):
     assert d.exists()
 
 
-def test_source_config_stays_next_to_the_package(monkeypatch):
+def test_source_and_frozen_use_the_windows_user_config(tmp_path, monkeypatch):
     monkeypatch.delenv("MYKRO_CONFIG", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(paths.sys, "platform", "win32")
+    seed = tmp_path / "bundle"
+    seed.mkdir()
+    (seed / "config.default.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(paths, "package_dir", lambda: seed)
     monkeypatch.setattr(paths, "is_frozen", lambda: False)
-    path = config_file()
-    assert path.name == "config.json"
-    assert (path.parent / "orchestrator_tk.py").is_file()
-    assert memory_file().parent == path.parent
+    source = config_file("MYKRO_SOURCE_TEST")
+    monkeypatch.setattr(paths, "is_frozen", lambda: True)
+    frozen = config_file("MYKRO_SOURCE_TEST")
+    assert source == frozen == tmp_path / "MYKRO_SOURCE_TEST" / "config.json"
+    assert memory_file().name == "memories.jsonl"
 
 
 def test_frozen_config_is_seeded_from_the_default(tmp_path, monkeypatch):

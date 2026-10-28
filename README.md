@@ -1,79 +1,103 @@
 # MYKRO
 
-MYKRO is a local-first AI harness. It lets a model that is already on your PC inspect, modify, and control a Windows machine. It does not ask for a cloud API key, and it does not download model weights.
+MYKRO is a local-first AI harness for Windows and Linux. It lets a model on your PC inspect, modify, and control the machine. It does not ask for a cloud API key.
 
-There is no `MYKRO.exe` to download. GitHub Releases has no files, and GitHub Actions cannot publish a build while this account's billing lock is in place. Clone the repo and run it on Windows.
+There is no `MYKRO.exe` to download. GitHub Releases has no files, and GitHub Actions cannot publish a build while this account's billing lock is in place. Clone the repo and run one setup command.
 
 ## Quick start
 
-Install Python 3.12 from [python.org](https://www.python.org/downloads/windows/). That installer includes tkinter, which the desktop window needs.
+Clone the repo, then run one command. It asks you to pick A, B, C, or D, asks whether you want a desktop icon, installs what that choice needs, downloads a local model, builds one MYKRO program, and opens that program.
+
+Windows:
 
 ```powershell
 git clone https://github.com/pottersblack/new-mykro.git
 cd new-mykro
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-`requirements.txt` is the runtime list. It points at `gui_flask\requirements.txt` (Flask, the gateway, and optional desktop-automation packages).
+Linux:
 
-Run from source:
+```bash
+git clone https://github.com/pottersblack/new-mykro.git
+cd new-mykro
+bash setup.sh
+```
+
+`python setup.py` is the same menu when Python is already on your PATH.
+
+```text
+  A  Small model
+     Weak or default PCs. Downloads qwen2.5-coder:1.5b (about 1 GB) and starts Ollama.
+
+  B  Stronger computer
+     Better PCs. Downloads qwen2.5-coder:7b (about 5 GB) and starts Ollama.
+
+  C  Heavy local server
+     Heavier machines. Downloads qwen2.5-coder:14b (about 9 GB) and starts Ollama.
+
+  D  Linux version
+     Full Linux install: desktop packages, wmctrl, xdotool, Ollama,
+     and qwen2.5-coder:7b, then MYKRO.
+```
+
+A, B, and C work on Windows and Linux. D runs on Linux. On Windows, D tells you to run `bash setup.sh` on a Linux machine. You do not point MYKRO at Ollama, LM Studio, or a `.gguf` yourself for this path.
+
+After the letter, the command asks `Create a desktop icon for MYKRO?` Type `y` or `n`. `y` puts a shortcut on the desktop. `n` skips it. The build still happens either way.
+
+The download is an Ollama model stored on this computer. Setup does not ask for a cloud API key or a Hugging Face token.
+
+The build is one file: `dist\MYKRO.exe` on Windows and `dist/MYKRO` on Linux. There is no folder of pieces to join, and there is no separate build step. The same command compiles it with PyInstaller and then launches that file.
+
+Boot and setup read and write one file:
+
+- Windows: `%LOCALAPPDATA%\MYKRO\config.json`
+- Linux: `~/.local/share/MYKRO/config.json`
+
+A source checkout and `dist\MYKRO.exe` both use that path. `gui_flask\config.json` is not the file the window reads. After A, B, or C, and again on every launch, that file is healed even when `setup.completed` is already true. It must contain `startup.autoconfig_on_launch` true, `startup.autofix_gateway_deps` true, `startup.server_mode` `all`, `setup.use_external_backend` false, `model.endpoint` `http://127.0.0.1:11434/v1/chat/completions`, `model.model_name` set to the picked model, `model.default_server` `MYKRO Gateway`, `gateway.host` `127.0.0.1`, `gateway.port` `8090`, `gateway.large_model` pointed at that Ollama model, and a non-empty `servers` list with `MYKRO Gateway`. The next launch logs `autoconfig_on_launch enabled` and the path it read. Chat uses that model without the Start button. No API key is written.
+
+GitHub Releases still has no download.
 
 ```powershell
-python orch.py
+.\dist\MYKRO.exe --version
+.\dist\MYKRO.exe --self-check
+.\dist\MYKRO.exe --setup
 ```
 
-`.\start-desktop.ps1` does the same GUI launch. If `llama-server.exe` is on `PATH` and a `.gguf` is in the repository `model` folder, that script starts llama-server first. Pass `-NoModel` to skip that.
+On Linux those same flags are `./dist/MYKRO --version`, `--self-check`, and `--setup`.
 
-Or build a local exe. This stays on your machine; nothing is uploaded.
+`--setup` opens the model picker. It does not download a new model. `--version` prints the version and exits. `--self-check` checks imports and the data directory without opening a window.
 
-```powershell
-python -m pip install -r requirements-build.txt
-python build_exe.py
-.\dist\MYKRO.exe
-```
+Python 3.12 is the version the Windows build uses. `setup.ps1` installs it with winget when `python` and `py` are missing. `setup.sh` installs `python3` when it is missing. The desktop window needs tkinter (`python3-tk` on Linux).
 
-`requirements-build.txt` installs PyInstaller 6.22.0. The build writes `dist\MYKRO.exe`. Python does not need to be installed on a PC that only runs that file. The exe uses the icon at `tools\mykro_icon.ico`, the version in `gui_flask\version.py`, and the bundled `gui_flask\config.default.json`. Your machine-specific `gui_flask\config.json` is not copied into the exe.
+## What the one command runs
 
-### Local models
+1. Linux packages when you are on Linux. Every Linux tier installs `python3-tk`, `python3-venv`, `python3-pip`, and `binutils`. D also installs `wmctrl` and `xdotool`, which the Linux window controls use.
+2. A `.venv` in the repo, then `pip install -r requirements.txt`. On Linux, if that install cannot build `pynput`, setup retries `requirements-linux.txt`.
+3. `pip install -r requirements-build.txt`, which installs PyInstaller 6.22.0.
+4. Ollama, if it is not already installed. Windows uses winget. Linux uses the Ollama install script.
+5. `ollama serve` when nothing is answering on `127.0.0.1:11434`.
+6. `ollama pull` for the tier's model, unless that model is already on disk.
+7. `python build_exe.py`, which writes one file: `dist\MYKRO.exe` on Windows or `dist/MYKRO` on Linux.
+8. A desktop icon when you answered `y`. Windows creates `MYKRO Desktop.lnk` on the desktop. Linux writes `MYKRO.desktop` on the desktop and in `~/.local/share/applications`.
+9. Launch that built file.
 
-This default branch does not start Ollama, LM Studio, Jan, or llama-server for you. Start one of those yourself, or place a `.gguf` file where MYKRO looks, then launch. The first window lists what is already running or already on disk. Use `--setup` to open that picker again.
+Non-interactive choice: `python setup.py --tier A --icon` or `--no-icon`. Add `--no-launch` to build the file and stop before opening it. `--dry-run` prints the commands and does not run them.
 
-- Ollama on `http://127.0.0.1:11434`
-- LM Studio on `http://127.0.0.1:1234`
-- Jan or another OpenAI-compatible server on `http://127.0.0.1:1337` or `:8000`
-- llama.cpp server on `http://127.0.0.1:8080` or `:8081`
-- `.gguf` files in the repository `model` folder, `%USERPROFILE%\models`, the LM Studio models folder, or `%LOCALAPPDATA%\MYKRO\models`
+## Build flags
 
-Automatic startup of an installed local server (Ollama, LM Studio, Jan, llama-server, or a `.gguf` already on disk) is in [pull request #1](https://github.com/pottersblack/new-mykro/pull/1), not in this branch yet.
+The setup command already runs the default one-file build. These flags are for a second build from the repo, not a step end users have to do:
 
-```powershell
-python orch.py --version
-python orch.py --self-check
-python orch.py --setup
-```
-
-The same three flags work on `.\dist\MYKRO.exe`. `--version` prints the version and exits. `--self-check` checks that the app can import, write its data directory, and probe for local models, without opening a window.
-
-The exe saves its choice under `%LOCALAPPDATA%\MYKRO\config.json`. A source checkout uses `gui_flask\config.json`, which is gitignored.
-
-## Build script flags
-
-- `python build_exe.py` and `python build_exe.py --launcher` build `dist\MYKRO.exe`
+- `python build_exe.py` and `python build_exe.py --launcher` build `dist\MYKRO.exe` on Windows and `dist/MYKRO` on Linux
 - `python build_exe.py --desktop` builds `dist\mykro-desktop.exe` from the Tkinter entry
 - `python build_exe.py --launcher --desktop` builds both
 - `python build_exe.py --onedir` writes the older folder layout
 - `python build_exe.py --windowed` hides the console window. `--version` output is then unavailable.
 - `python build_exe.py --no-clean` preserves existing `build\` and `dist\` directories
 
-## Packaging notes
-
 The build helper copies a minimized `gui_flask/` data tree into a temporary packaging directory and excludes runtime logs, cache folders, and `config.json`. Generated build output is ignored by `.gitignore`.
 
-If PyInstaller cannot be installed, `.\tools\build_fallback.ps1 -CreateShortcuts` writes batch launchers (`dist\mykro-launcher\mykro-launcher.bat` and `dist\mykro-desktop\mykro-desktop.bat`) and desktop shortcuts. Those are not real `.exe` files.
-
-After `python build_exe.py`, `.\tools\create_mykro_shortcut.ps1` places a `MYKRO Desktop.lnk` shortcut on your desktop. It defaults to `dist\MYKRO.exe`.
+If PyInstaller cannot be installed, `.\tools\build_fallback.ps1 -CreateShortcuts` writes batch launchers and desktop shortcuts. Those are not real `.exe` files. The setup command does not use that fallback.
 
 ## Tests
 
@@ -84,8 +108,8 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-`tests\live_da_test.py` talks to a live model and drives the desktop agent. Run it by hand on Windows; pytest does not collect it.
+`tests\live_da_test.py` talks to a live model and drives the desktop agent. Run it by hand; pytest does not collect it.
 
 ## Configuration
 
-Do not commit `gui_flask\config.json` or `.env`. Copy `gui_flask\config.default.json` to `gui_flask\config.json` if you want a starting file. Copy `gui_flask\.env.example` to `.env` only if you use the Discord bot or a local OpenClaw gateway. Neither file is required to launch.
+Do not commit `gui_flask\config.json` or `.env`. Copy `gui_flask\.env.example` to `.env` only if you use the Discord bot or a local OpenClaw gateway. Neither file is required to launch.

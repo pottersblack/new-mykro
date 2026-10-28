@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -60,30 +61,53 @@ def package_dir() -> Path:
 
 
 def config_file(app_name: str = "MYKRO") -> Path:
-    """Writable config path.
+    """The one config boot and setup both use.
 
-    Source checkouts keep using gui_flask/config.json. A frozen exe seeds
-    %LOCALAPPDATA%\\MYKRO\\config.json from the bundled default the first time
-    it runs, because the PyInstaller bundle is read-only. MYKRO_CONFIG overrides
-    both locations.
+    On Windows this is ``%LOCALAPPDATA%\\MYKRO\\config.json``. On Linux it is
+    ``~/.local/share/MYKRO/config.json``. A source checkout and a frozen exe
+    read that same file. ``MYKRO_CONFIG`` overrides it. ``gui_flask/config.json``
+    is only a seed when the user file does not exist yet.
     """
     override = os.environ.get("MYKRO_CONFIG", "").strip()
     if override:
         return Path(override).expanduser()
-    if not is_frozen():
-        return package_dir() / "config.json"
 
     ensure_data_dirs(app_name)
     dest = data_dir(app_name) / "config.json"
     if dest.exists():
         return dest
 
-    seed = package_dir() / "config.default.json"
-    if seed.is_file():
+    seed = _seed_config_source()
+    if seed is not None:
         shutil.copyfile(seed, dest)
     else:
         dest.write_text("{}\n", encoding="utf-8")
     return dest
+
+
+def _seed_config_source() -> Path | None:
+    """Default seed, or a package config that already names a loopback model.
+
+    A package config with an API key is never copied into the user profile.
+    """
+    package_config = package_dir() / "config.json"
+    default_config = package_dir() / "config.default.json"
+    if package_config.is_file():
+        try:
+            raw = json.loads(package_config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            raw = None
+        model = raw.get("model") if isinstance(raw, dict) else None
+        endpoint = str(model.get("endpoint") or "") if isinstance(model, dict) else ""
+        has_secret = isinstance(raw, dict) and (
+            "api_key" in raw or (isinstance(model, dict) and "api_key" in model)
+        )
+        loopback = "127.0.0.1" in endpoint or "localhost" in endpoint or "[::1]" in endpoint
+        if isinstance(raw, dict) and not has_secret and loopback and "/chat/completions" in endpoint:
+            return package_config
+    if default_config.is_file():
+        return default_config
+    return None
 
 
 def memory_file(app_name: str = "MYKRO") -> Path:

@@ -7,6 +7,7 @@ from gui_flask.local_models import (
     SETUP_HELP,
     DiscoveredModel,
     Discovery,
+    adopt_package_model,
     apply_choice,
     discover_local_models,
     dispatch_argv,
@@ -93,6 +94,41 @@ def test_gguf_scan_respects_depth(tmp_path: Path):
     assert [path.name for path in found] == ["coder.gguf"]
 
 
+def test_empty_user_config_adopts_the_saved_local_model(tmp_path: Path, monkeypatch):
+    package = tmp_path / "gui_flask"
+    package.mkdir()
+    (package / "config.json").write_text(
+        json.dumps(
+            {
+                "model": {
+                    "backend": "ollama",
+                    "model_name": "qwen2.5-coder:1.5b",
+                    "endpoint": "http://127.0.0.1:11434/v1/chat/completions",
+                },
+                "startup": {"autoconfig_on_launch": True},
+                "setup": {"requires_cloud_api_key": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("gui_flask.local_models.package_dir", lambda: package)
+    user = tmp_path / "MYKRO" / "config.json"
+    user.parent.mkdir()
+    user.write_text('{"model": {"endpoint": ""}, "startup": {"autoconfig_on_launch": false}}\n', encoding="utf-8")
+    adopt_package_model(user)
+    saved = json.loads(user.read_text(encoding="utf-8"))
+    assert saved["model"]["model_name"] == "qwen2.5-coder:1.5b"
+    assert saved["startup"]["autoconfig_on_launch"] is True
+
+    user.write_text(
+        json.dumps({"model": {"endpoint": "http://127.0.0.1:11434/v1/chat/completions", "model_name": "keep"}}),
+        encoding="utf-8",
+    )
+    adopt_package_model(user)
+    kept = json.loads(user.read_text(encoding="utf-8"))
+    assert kept["model"]["model_name"] == "keep"
+
+
 def test_needs_setup_leaves_a_configured_endpoint_alone():
     assert needs_setup({}) is True
     assert needs_setup({"model": {"endpoint": "http://localhost/dummy"}}) is True
@@ -119,11 +155,17 @@ def test_apply_choice_saves_local_model_without_an_api_key(tmp_path: Path):
     assert saved["model"]["model_name"] == "mistral:7b"
     assert saved["model"]["type"] == "openai"
     assert saved["model"]["endpoint"].endswith("/v1/chat/completions")
+    assert saved["model"]["default_server"] == "MYKRO Gateway"
     assert saved["setup"]["completed"] is True
     assert saved["setup"]["requires_cloud_api_key"] is False
-    assert saved["setup"]["use_external_backend"] is True
-    assert saved["startup"]["server_mode"] == "off"
-    assert saved["startup"]["autoconfig_on_launch"] is False
+    assert saved["setup"]["use_external_backend"] is False
+    assert saved["startup"]["server_mode"] == "all"
+    assert saved["startup"]["autoconfig_on_launch"] is True
+    assert saved["startup"]["autofix_gateway_deps"] is True
+    assert saved["gateway"]["host"] == "127.0.0.1"
+    assert saved["gateway"]["large_model"]["endpoint"].endswith("/v1/chat/completions")
+    assert saved["gateway"]["large_model"]["model_name"] == "mistral:7b"
+    assert any(item.get("name") == "MYKRO Gateway" for item in saved["servers"])
     assert "api_key" not in saved
     assert "api_key" not in saved["model"]
     assert needs_setup(saved) is False

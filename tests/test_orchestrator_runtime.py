@@ -224,3 +224,64 @@ def test_chat_request_skips_gateway_backed_default_fallback(monkeypatch: pytest.
 
     assert "no local llama-server" in result.lower()
     assert dummy_self.hub.generate_called is False
+
+
+def test_chat_uses_the_saved_ollama_model_when_the_gateway_is_down(monkeypatch: pytest.MonkeyPatch):
+    class DummyConfig:
+        def get(self, key: str, default=None):
+            data = {
+                "settings": {},
+                "model": {
+                    "backend": "ollama",
+                    "model_name": "qwen2.5-coder:1.5b",
+                    "endpoint": "http://127.0.0.1:11434/v1/chat/completions",
+                },
+            }
+            return data.get(key, default)
+
+    class DummyHub:
+        def __init__(self):
+            self.model_clients = {}
+            self.config = DummyConfig()
+
+    class DummySelf:
+        def __init__(self):
+            self.hub = DummyHub()
+
+        def _get_gateway_base_url(self) -> str:
+            return "http://127.0.0.1:9"
+
+        def _get_web_ui_base_url(self) -> str:
+            return "http://127.0.0.1:9"
+
+    seen: list[tuple[str, dict]] = []
+
+    def urlopen(request, timeout=0):
+        del timeout
+        if request.full_url.startswith("http://127.0.0.1:9"):
+            raise OSError("gateway down")
+        payload = json.loads(request.data.decode("utf-8"))
+        seen.append((request.full_url, payload))
+
+        import io
+
+        class Response:
+            def __init__(self, body: bytes) -> None:
+                self._body = io.BytesIO(body)
+
+            def __enter__(self):
+                return self._body
+
+            def __exit__(self, *args):
+                return False
+
+        body = json.dumps({"choices": [{"message": {"content": "ready"}}]}).encode("utf-8")
+        return Response(body)
+
+    monkeypatch.setattr(orchestrator_tk.urllib.request, "urlopen", urlopen)
+    result = orchestrator_tk.AppGUI._chat_request(DummySelf(), "hello")
+    assert result == "ready"
+    assert seen
+    assert seen[0][0] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert seen[0][1]["model"] == "qwen2.5-coder:1.5b"
+    assert "api_key" not in seen[0][1]

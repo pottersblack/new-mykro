@@ -1,10 +1,10 @@
-"""Build a single Windows MYKRO.exe with PyInstaller.
+"""Build a single MYKRO program with PyInstaller.
 
-Default (`python build_exe.py`) writes `dist/MYKRO.exe` from `orch.py`.
-The executable is a console program so `--version` and `--self-check` are
-visible to CI and to a local terminal. `--windowed` hides that console.
-`--desktop` writes `dist/mykro-desktop.exe` from the Tkinter GUI.
-`--onedir` keeps the older folder layout.
+Default (`python build_exe.py`) writes one file from `orch.py`: `dist/MYKRO.exe`
+on Windows and `dist/MYKRO` on Linux. End users get that file from `setup.py`.
+The program is a console build so `--version` and `--self-check` are visible.
+`--windowed` hides that console. `--desktop` writes `dist/mykro-desktop.exe`
+from the Tkinter entry. `--onedir` keeps the older folder layout.
 
 The helper copies a minimal runtime data tree from `gui_flask/` while excluding
 logs, the machine-specific config, and internal cache files. The bundled
@@ -39,6 +39,11 @@ HIDDEN_IMPORTS = (
     "gui_flask.paths",
     "gui_flask.version",
     "gui_flask.local_models",
+    "gui_flask.boot_config",
+    "gui_flask.launch_autoconfig",
+    "gui_flask.linux_control",
+    "gui_flask.setup_menu",
+    "gui_flask.win_control",
     "gui_flask.orchestrator_tk",
     "gui_flask.hub",
     "gui_flask.autoconfig",
@@ -213,7 +218,7 @@ def build_pyinstaller_command(
         "--paths",
         str(ROOT),
     ]
-    if icon_file is not None and icon_file.exists():
+    if icon_file is not None and icon_file.exists() and is_windows():
         args.extend(["--icon", str(icon_file)])
     if version_file is not None and is_windows():
         args.extend(["--version-file", str(version_file)])
@@ -253,7 +258,7 @@ def build_executable(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build MYKRO Windows executables.")
+    parser = argparse.ArgumentParser(description="Build the single-file MYKRO program.")
     parser.add_argument(
         "--launcher",
         action="store_true",
