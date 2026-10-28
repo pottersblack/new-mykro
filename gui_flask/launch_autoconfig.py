@@ -148,6 +148,9 @@ def locate_installed_backends(
                 [
                     program_file(local, "Programs", "Ollama", "ollama.exe"),
                     program_file(program, "Ollama", "ollama.exe"),
+                    Path("/usr/local/bin/ollama"),
+                    Path("/usr/bin/ollama"),
+                    home_dir / ".local" / "bin" / "ollama",
                 ]
             ),
             True,
@@ -386,7 +389,8 @@ def bootstrap_local_backend(
             return inventory
         if plan.name == "ollama":
             inventory.notes.append(
-                "Ollama started but has no local models yet. MYKRO will not download one."
+                "Ollama is running but has no local model yet. "
+                "Run setup.ps1 or bash setup.sh and choose A, B, C, or D to download one."
             )
     if inventory.chosen is None and not inventory.installed and not running:
         inventory.notes.append("No local model server is installed yet.")
@@ -414,7 +418,11 @@ def first_run_choices(inventory: LaunchInventory) -> list[FirstRunChoice]:
     return choices
 
 
-def install_ollama_command() -> list[str]:
+def install_ollama_command(platform: str | None = None) -> list[str]:
+    """Install Ollama for this operating system. No cloud API key is used."""
+    name = sys.platform if platform is None else platform
+    if not str(name).lower().startswith("win"):
+        return ["sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh"]
     return [
         "winget",
         "install",

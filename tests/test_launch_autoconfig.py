@@ -145,8 +145,11 @@ def test_install_runs_only_when_the_first_run_choice_asks(tmp_path: Path):
     )
     assert result == "deferred"
     assert commands == [install_ollama_command()]
-    assert "Ollama.Ollama" in commands[0]
-    assert "api" not in " ".join(commands[0]).casefold()
+    joined = " ".join(commands[0]).casefold()
+    assert "ollama" in joined
+    assert "api_key" not in joined
+    assert "huggingface" not in joined
+    assert "openai.com" not in joined
 
 
 def test_continue_without_a_model_records_completion(tmp_path: Path):

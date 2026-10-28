@@ -1,54 +1,51 @@
 # MYKRO
 
-MYKRO is a local-first AI harness. It lets a model that is already on your PC inspect, modify, and control a Windows machine. It does not ask for a cloud API key, and it does not download model weights.
+MYKRO is a local-first AI harness for Windows and Linux. It lets a model on your PC inspect, modify, and control the machine. It does not ask for a cloud API key.
 
-There is no `MYKRO.exe` to download. GitHub Releases has no files, and GitHub Actions cannot publish a build while this account's billing lock is in place. Clone the repo and run it on Windows.
+There is no `MYKRO.exe` to download. GitHub Releases has no files, and GitHub Actions cannot publish a build while this account's billing lock is in place. Clone the repo and run one setup command.
 
 ## Quick start
 
-Install Python 3.12 from [python.org](https://www.python.org/downloads/windows/). That installer includes tkinter, which the desktop window needs.
+Clone the repo, then run one command. The command prints a menu. Pick A, B, C, or D. That choice installs what it needs, downloads a local model, starts the model server, and opens MYKRO.
+
+Windows:
 
 ```powershell
 git clone https://github.com/pottersblack/new-mykro.git
 cd new-mykro
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-`requirements.txt` is the runtime list. It points at `gui_flask\requirements.txt` (Flask, the gateway, and optional desktop-automation packages).
+Linux:
 
-Run from source:
-
-```powershell
-python orch.py
+```bash
+git clone https://github.com/pottersblack/new-mykro.git
+cd new-mykro
+bash setup.sh
 ```
 
-`.\start-desktop.ps1` does the same GUI launch. If `llama-server.exe` is on `PATH` and a `.gguf` is in the repository `model` folder, that script starts llama-server first. Pass `-NoModel` to skip that.
+`python setup.py` is the same menu when Python is already on your PATH.
 
-Or build a local exe. This stays on your machine; nothing is uploaded.
+```text
+  A  Small model
+     Weak or default PCs. Downloads qwen2.5-coder:1.5b (about 1 GB) and starts Ollama.
 
-```powershell
-python -m pip install -r requirements-build.txt
-python build_exe.py
-.\dist\MYKRO.exe
+  B  Stronger computer
+     Better PCs. Downloads qwen2.5-coder:7b (about 5 GB) and starts Ollama.
+
+  C  Heavy local server
+     Heavier machines. Downloads qwen2.5-coder:14b (about 9 GB) and starts Ollama.
+
+  D  Linux version
+     Full Linux install: desktop packages, wmctrl, xdotool, Ollama,
+     and qwen2.5-coder:7b, then MYKRO.
 ```
 
-`requirements-build.txt` installs PyInstaller 6.22.0. The build writes `dist\MYKRO.exe`. Python does not need to be installed on a PC that only runs that file. The exe uses the icon at `tools\mykro_icon.ico`, the version in `gui_flask\version.py`, and the bundled `gui_flask\config.default.json`. Your machine-specific `gui_flask\config.json` is not copied into the exe.
+A, B, and C work on Windows and Linux. D runs on Linux. On Windows, D tells you to run `bash setup.sh` on a Linux machine. You do not point MYKRO at Ollama, LM Studio, or a `.gguf` yourself for this path.
 
-### Local model on launch
+The download is an Ollama model stored on this computer. Setup does not ask for a cloud API key or a Hugging Face token.
 
-A normal launch (`python orch.py` or `dist\MYKRO.exe`, without `--setup`) configures a local server for you:
-
-1. It uses a loopback server that is already answering.
-2. If nothing is answering, it starts the first installed program that can serve a model already on disk: `ollama serve`, LM Studio's `lms server start`, `llama-server -m <gguf>` on `127.0.0.1:8080`, Jan, then the LM Studio app.
-3. It waits until that endpoint answers, then saves the choice. The exe writes `%LOCALAPPDATA%\MYKRO\config.json`. A source checkout writes `gui_flask\config.json` (gitignored).
-4. Later launches keep that choice and restart the same backend if its port is down.
-5. If nothing usable is installed, a first-run window can start an installed server or install Ollama. Closing it asks again next time.
-
-It looks for Ollama (`127.0.0.1:11434`), LM Studio (`127.0.0.1:1234`), Jan or another OpenAI-compatible server (`127.0.0.1:1337` or `:8000`), llama.cpp (`127.0.0.1:8080` or `:8081`), and `.gguf` files in the repository `model` folder, `%USERPROFILE%\models`, the LM Studio models folder, or `%LOCALAPPDATA%\MYKRO\models`.
-
-`--setup` is the override that opens the picker so you can choose a specific model yourself.
+A source checkout saves the choice in `gui_flask\config.json` (gitignored). A frozen exe saves `%LOCALAPPDATA%\MYKRO\config.json` on Windows and `~/.local/share/MYKRO/config.json` on Linux. Later launches reuse that model and start Ollama again if its port is down.
 
 ```powershell
 python orch.py --version
@@ -56,22 +53,43 @@ python orch.py --self-check
 python orch.py --setup
 ```
 
-The same three flags work on `.\dist\MYKRO.exe`. `--version` prints the version and exits. `--self-check` checks that the app can import, write its data directory, and probe for local models, without opening a window. `--windowed` builds hide the console, so those flags are for the default console exe.
+`--setup` opens the model picker. It does not download a new model. `--version` prints the version and exits. `--self-check` checks imports and the data directory without opening a window.
 
-## Build script flags
+Python 3.12 is the version the Windows build uses. `setup.ps1` installs it with winget when `python` and `py` are missing. `setup.sh` installs `python3` when it is missing. The desktop window needs tkinter (`python3-tk` on Linux).
+
+## What the menu runs
+
+1. Linux packages when you are on Linux. Every Linux tier installs `python3-tk`, `python3-venv`, and `python3-pip`. D also installs `wmctrl` and `xdotool`, which the Linux window controls use.
+2. A `.venv` in the repo, then `pip install -r requirements.txt`. On Linux, if that install cannot build `pynput`, setup retries `requirements-linux.txt`.
+3. Ollama, if it is not already installed. Windows uses winget. Linux uses the Ollama install script.
+4. `ollama serve` when nothing is answering on `127.0.0.1:11434`.
+5. `ollama pull` for the tier's model, unless that model is already on disk.
+6. `orch.py` from the virtual environment.
+
+Non-interactive choice: `python setup.py --tier A`. Add `--no-launch` to stop after the model is saved. `--dry-run` prints the commands and does not run them.
+
+## Build a Windows exe
+
+This stays on your machine. Nothing is uploaded.
+
+```powershell
+python -m pip install -r requirements-build.txt
+python build_exe.py
+.\dist\MYKRO.exe
+```
+
+`requirements-build.txt` installs PyInstaller 6.22.0. Python does not need to be installed on a PC that only runs that file. `--version`, `--self-check`, and `--setup` work on `.\dist\MYKRO.exe`.
 
 - `python build_exe.py` and `python build_exe.py --launcher` build `dist\MYKRO.exe`
 - `python build_exe.py --desktop` builds `dist\mykro-desktop.exe` from the Tkinter entry
 - `python build_exe.py --launcher --desktop` builds both
 - `python build_exe.py --onedir` writes the older folder layout
-- `python build_exe.py --windowed` hides the console window
+- `python build_exe.py --windowed` hides the console window. `--version` output is then unavailable.
 - `python build_exe.py --no-clean` preserves existing `build\` and `dist\` directories
 
-## Packaging notes
+The build helper copies a minimized `gui_flask/` data tree into a temporary packaging directory and excludes runtime logs, cache folders, and `config.json`. Generated build output is ignored by `.gitignore`.
 
-The build helper copies a minimized `gui_flask/` data tree into a temporary packaging directory and excludes runtime logs, cache folders, and `config.json`. Generated artifacts are ignored by `.gitignore`.
-
-If PyInstaller cannot be installed, `.\tools\build_fallback.ps1 -CreateShortcuts` writes batch launchers (`dist\mykro-launcher\mykro-launcher.bat` and `dist\mykro-desktop\mykro-desktop.bat`) and desktop shortcuts. Those are not real `.exe` files.
+If PyInstaller cannot be installed, `.\tools\build_fallback.ps1 -CreateShortcuts` writes batch launchers and desktop shortcuts. Those are not real `.exe` files.
 
 After `python build_exe.py`, `.\tools\create_mykro_shortcut.ps1` places a `MYKRO Desktop.lnk` shortcut on your desktop. It defaults to `dist\MYKRO.exe`.
 
@@ -84,7 +102,7 @@ python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-`tests\live_da_test.py` talks to a live model and drives the desktop agent. Run it by hand on Windows; pytest does not collect it.
+`tests\live_da_test.py` talks to a live model and drives the desktop agent. Run it by hand; pytest does not collect it.
 
 ## Configuration
 

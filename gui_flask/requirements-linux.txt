@@ -1,0 +1,13 @@
+# Linux runtime. pynput is omitted because it needs libevdev headers to build.
+# Option D installs wmctrl and xdotool for window control.
+Flask>=2.0
+requests
+zeroconf>=0.131.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+httpx>=0.25.0
+pyautogui>=0.9.54
+Pillow>=10.0
+pytesseract>=0.3.10
+discord.py>=2.3.0
+aiohttp>=3.9.0

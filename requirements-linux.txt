@@ -1,0 +1,2 @@
+# Linux runtime used when the full requirements list cannot build pynput.
+-r gui_flask/requirements-linux.txt

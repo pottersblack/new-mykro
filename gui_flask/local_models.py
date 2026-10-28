@@ -52,7 +52,10 @@ MYKRO did not find a local model it can use yet.
 
 A normal launch starts an installed local server for you: Ollama, LM Studio's
 local server, Jan, or llama-server with a .gguf already on disk. It waits
-until that endpoint answers, then saves it. MYKRO does not download weights.
+until that endpoint answers, then saves it. This picker does not download weights.
+
+To download a local model and start MYKRO in one step, run setup.ps1 on Windows
+or bash setup.sh on Linux, then choose A, B, C, or D.
 
 This window is the --setup override, for picking a specific model yourself.
 
@@ -691,9 +694,13 @@ def run_self_check() -> int:
     try:
         try:
             import gui_flask.launch_autoconfig  # noqa: F401
+            import gui_flask.linux_control  # noqa: F401
+            import gui_flask.setup_menu  # noqa: F401
             import gui_flask.win_control  # noqa: F401
         except ImportError:
             import launch_autoconfig  # noqa: F401
+            import linux_control  # noqa: F401
+            import setup_menu  # noqa: F401
             import win_control  # noqa: F401
     except Exception as exc:
         errors.append(f"launch import failed: {exc}")

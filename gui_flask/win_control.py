@@ -8,6 +8,7 @@ desktop. The adapter is the only piece that calls user32.
 from __future__ import annotations
 
 import ctypes
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable, Protocol
@@ -159,6 +160,17 @@ def select_window(windows: list[WindowRecord], query: WindowQuery) -> WindowReco
     return ranked[0][3]
 
 
+def default_window_port() -> Win32Port:
+    """Win32 on Windows. The Linux window tools on Linux."""
+    if sys.platform.startswith("linux"):
+        try:
+            from gui_flask.linux_control import LinuxPort
+        except ImportError:
+            from linux_control import LinuxPort
+        return LinuxPort()
+    return Win32Adapter()
+
+
 class WindowControl:
     """Retrying focus with backoff, UAC refusal, and foreground confirmation."""
 
@@ -171,7 +183,7 @@ class WindowControl:
         backoff: float = 0.15,
         abort: object | None = None,
     ) -> None:
-        self.port = port if port is not None else Win32Adapter()
+        self.port = port if port is not None else default_window_port()
         self.sleeper = sleeper or time.sleep
         self.attempts = max(1, int(attempts))
         self.backoff = max(0.0, float(backoff))
