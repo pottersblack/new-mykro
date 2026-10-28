@@ -24,13 +24,14 @@ def test_default_command_is_a_single_console_exe(tmp_path: Path):
     assert "--console" in command
     assert "--name" in command
     assert command[command.index("--name") + 1] == "MYKRO"
-    assert "--icon" in command
     assert "gui_flask.local_models" in command
     assert "gui_flask.orchestrator_tk" in command
     if build_exe.is_windows():
         assert "--version-file" in command
+        assert "--icon" in command
     else:
         assert "--version-file" not in command
+        assert "--icon" not in command
 
 
 def test_version_file_matches_package_version(tmp_path: Path):

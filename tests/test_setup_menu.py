@@ -15,7 +15,10 @@ from gui_flask.setup_menu import (
     main,
     model_present,
     parse_tier,
+    parse_yes_no,
     render_menu,
+    windows_shortcut_command,
+    write_linux_desktop_files,
 )
 from gui_flask.win_control import SW_MINIMIZE, WindowControl, WindowQuery, default_window_port
 
@@ -75,10 +78,14 @@ def test_windows_plan_downloads_the_small_model_without_wiring(tmp_path: Path):
     assert plan.install_ollama[0] == "winget"
     assert plan.pull == ["ollama", "pull", "qwen2.5-coder:1.5b"]
     assert plan.serve == ["ollama", "serve"]
-    assert plan.launch[-1].endswith("orch.py")
+    assert plan.launch == [str(tmp_path / "dist" / "MYKRO.exe")]
+    assert plan.build[-1].endswith("build_exe.py")
+    assert "--onedir" not in plan.build
+    assert plan.pip_build[-1] == "requirements-build.txt"
+    assert plan.desktop_icon is False
     assert plan.endpoint.startswith("http://127.0.0.1:11434")
     assert [command[-1] for command in plan.pip] == ["requirements.txt"]
-    _no_cloud([plan.install_ollama, plan.pull, plan.serve, plan.launch])
+    _no_cloud([plan.install_ollama, plan.pull, plan.serve, plan.build, plan.launch])
 
 
 def test_stronger_presets_change_only_the_model(tmp_path: Path):
@@ -135,7 +142,9 @@ def test_linux_tier_installs_desktop_tools_and_a_local_model(tmp_path: Path):
     assert plan.install_ollama[0] == "sh"
     assert "install.sh" in plan.install_ollama[-1]
     assert plan.pull[-1] == "qwen2.5-coder:7b"
-    assert plan.launch[0] == str(tmp_path / ".venv" / "bin" / "python")
+    assert plan.launch == [str(tmp_path / "dist" / "MYKRO")]
+    assert not plan.executable.endswith(".exe")
+    assert "binutils" in plan.apt
     assert any(command[-1] == "requirements-linux.txt" for command in plan.pip)
     _no_cloud([plan.apt, plan.install_ollama, plan.pull])
 
@@ -206,6 +215,8 @@ def test_execute_installs_pulls_saves_and_launches(tmp_path: Path):
         "qwen2.5-coder:1.5b",
     ] in commands
     assert launched == [plan.launch]
+    assert plan.launch == [str(tmp_path / "dist" / "MYKRO")]
+    assert any(command[-1].endswith("build_exe.py") for command in commands)
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["model"]["backend"] == "ollama"
     assert saved["model"]["model_name"] == "qwen2.5-coder:1.5b"
@@ -292,7 +303,11 @@ def test_linux_pip_falls_back_when_the_full_list_fails(tmp_path: Path):
     )
     assert result.ok is True
     pip = [command for command in seen if "pip" in command and "-m" in command]
-    assert [command[-1] for command in pip] == ["requirements.txt", "requirements-linux.txt"]
+    assert [command[-1] for command in pip] == [
+        "requirements.txt",
+        "requirements-linux.txt",
+        "requirements-build.txt",
+    ]
 
 
 def test_failed_download_does_not_launch(tmp_path: Path):
@@ -345,6 +360,9 @@ def test_menu_dry_run_and_noninteractive_tier(tmp_path: Path):
     text = "\n".join(printed)
     assert "qwen2.5-coder:7b" in text
     assert "winget" in text
+    assert "build_exe.py" in text
+    assert "MYKRO.exe" in text
+    assert "Desktop icon: no" in text
 
     refused: list[str] = []
     code = main(
@@ -372,7 +390,7 @@ def test_menu_dry_run_and_noninteractive_tier(tmp_path: Path):
 
 
 def test_interactive_choice_runs_the_selected_tier(tmp_path: Path):
-    answers = iter(["nope", "C"])
+    answers = iter(["nope", "C", "n"])
     printed: list[str] = []
     launched: list[list[str]] = []
 
@@ -408,6 +426,7 @@ def test_interactive_choice_runs_the_selected_tier(tmp_path: Path):
     assert saved["setup"]["tier"] == "C"
     assert saved["model"]["model_name"] == "qwen2.5-coder:14b"
     assert "Enter A, B, C, or D." in "\n".join(printed)
+    assert "Create a desktop icon for MYKRO?" in "\n".join(printed)
 
 
 def test_wrappers_are_the_one_command():
@@ -422,6 +441,134 @@ def test_wrappers_are_the_one_command():
     assert "setup.sh" in readme
     assert "latest release" not in readme.casefold()
     assert "MYKRO-windows" not in readme
+    assert "desktop icon" in readme.casefold()
+    assert "dist\\MYKRO.exe" in readme or "dist/MYKRO.exe" in readme
+    assert "dist/MYKRO" in readme
+
+
+def test_icon_choice_builds_one_file_and_still_launches_if_the_icon_fails(tmp_path: Path):
+    plan = build_plan(
+        "A",
+        platform="windows",
+        repo_root=tmp_path,
+        python="py",
+        ollama_path="ollama",
+        venv_ready=True,
+        desktop_icon=True,
+    )
+    assert plan.executable.endswith("MYKRO.exe")
+    assert plan.desktop_icon is True
+    shortcut = windows_shortcut_command(tmp_path, Path(plan.executable))
+    assert shortcut[0] == "powershell"
+    assert "create_mykro_shortcut.ps1" in shortcut[5]
+    assert shortcut[-1].endswith("MYKRO.exe")
+
+    launched: list[list[str]] = []
+    icons: list[str] = []
+
+    def opener(url: str, timeout: float):
+        del timeout
+        if url == TAGS:
+            return {"models": [{"name": "qwen2.5-coder:1.5b"}]}
+        return None
+
+    result = execute_plan(
+        plan,
+        config_path=tmp_path / "config.json",
+        run=lambda argv: (False, "pyinstaller failed") if str(argv[-1]).endswith("build_exe.py") else (True, ""),
+        spawn=lambda _argv: None,
+        opener=opener,
+        launch=lambda argv: launched.append(argv) or 0,
+        sleeper=lambda _seconds: None,
+        clock=lambda: 0.0,
+        serve_timeout=0,
+        place_icon=lambda chosen: icons.append(chosen.executable) or (True, "icon"),
+    )
+    assert result.ok is False
+    assert "pyinstaller failed" in result.message
+    assert launched == []
+    assert icons == []
+
+    built = build_plan(
+        "B",
+        platform="linux",
+        repo_root=tmp_path,
+        python="python3",
+        ollama_path="/usr/bin/ollama",
+        venv_ready=True,
+        root=True,
+        desktop_icon=True,
+    )
+    launched.clear()
+    result = execute_plan(
+        built,
+        config_path=tmp_path / "built.json",
+        run=lambda _argv: (True, ""),
+        spawn=lambda _argv: None,
+        opener=lambda url, _timeout: {"models": [{"name": "qwen2.5-coder:7b"}]} if url == TAGS else None,
+        launch=lambda argv: launched.append(argv) or 0,
+        sleeper=lambda _seconds: None,
+        clock=lambda: 0.0,
+        serve_timeout=0,
+        place_icon=lambda _chosen: (False, "desktop folder missing"),
+    )
+    assert result.ok is True
+    assert result.launched is True
+    assert launched == [built.launch]
+
+
+def test_linux_desktop_file_points_at_the_binary(tmp_path: Path):
+    home = tmp_path / "home"
+    (home / ".config").mkdir(parents=True)
+    (home / ".config" / "user-dirs.dirs").write_text(
+        'XDG_DESKTOP_DIR="$HOME/Desktop"\n',
+        encoding="utf-8",
+    )
+    exe = tmp_path / "dist" / "MYKRO"
+    exe.parent.mkdir()
+    exe.write_text("binary\n", encoding="utf-8")
+    path = write_linux_desktop_files(home, exe, tmp_path / "tools" / "mykro_icon.ico")
+    assert path == home / "Desktop" / "MYKRO.desktop"
+    text = path.read_text(encoding="utf-8")
+    assert f"Exec={exe}" in text
+    assert "Name=MYKRO" in text
+    assert "api_key" not in text
+    assert "huggingface" not in text.casefold()
+    apps = home / ".local" / "share" / "applications" / "MYKRO.desktop"
+    assert apps.read_text(encoding="utf-8") == text
+    assert parse_yes_no("y") is True
+    assert parse_yes_no("NO") is False
+    assert parse_yes_no("maybe") is None
+
+
+def test_dry_run_can_request_the_desktop_icon(tmp_path: Path):
+    printed: list[str] = []
+    code = main(
+        ["--tier", "A", "--icon", "--dry-run"],
+        platform="windows",
+        repo_root=tmp_path,
+        python="py",
+        print_fn=printed.append,
+        locate_ollama=lambda: r"C:\Ollama\ollama.exe",
+        venv_ready=True,
+        isatty=False,
+    )
+    assert code == 0
+    text = "\n".join(printed)
+    assert "Desktop icon: yes" in text
+    assert "dist" in text and "MYKRO.exe" in text
+    conflict: list[str] = []
+    code = main(
+        ["--tier", "A", "--icon", "--no-icon"],
+        platform="linux",
+        repo_root=tmp_path,
+        print_fn=conflict.append,
+        locate_ollama=lambda: "/usr/bin/ollama",
+        venv_ready=True,
+        isatty=False,
+    )
+    assert code == 2
+    assert "either --icon or --no-icon" in "\n".join(conflict)
 
 
 def test_linux_window_port_parses_targets_and_focuses():

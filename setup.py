@@ -4,8 +4,8 @@
 Windows:  powershell -ExecutionPolicy Bypass -File .\\setup.ps1
 Linux:    bash setup.sh
 
-Both wrappers run this file. It asks for A, B, C, or D, then installs a local
-model server, downloads that tier's model, and starts MYKRO.
+Both wrappers run this file. It asks for A, B, C, or D, asks about a desktop
+icon, installs a local model, builds one MYKRO program, and launches it.
 """
 
 from __future__ import annotations

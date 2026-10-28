@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One command after clone. Presents A / B / C / D, then starts MYKRO.
+# One command after clone: A / B / C / D, desktop icon, build dist/MYKRO, launch it.
 set -euo pipefail
 cd "$(dirname "$0")"
 

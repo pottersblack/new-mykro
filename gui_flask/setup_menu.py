@@ -1,7 +1,9 @@
-"""A / B / C / D setup. One command installs a local model and starts MYKRO.
+"""A / B / C / D setup. One command builds MYKRO and starts that program.
 
 A, B, and C pull an Ollama model sized for the machine. D is the Linux
 install: desktop packages, Ollama, a local model, and the Linux window tools.
+The command then asks about a desktop icon, builds one file with PyInstaller
+(`dist/MYKRO.exe` on Windows, `dist/MYKRO` on Linux), and launches it.
 Nothing here asks for a cloud API key or a Hugging Face token.
 """
 
@@ -90,6 +92,11 @@ class SetupPlan:
     ollama: str
     serve: list[str]
     pull: list[str]
+    pip_build: list[str]
+    build: list[str]
+    executable: str
+    desktop_icon: bool
+    repo_root: str
     launch: list[str]
     endpoint: str
 
@@ -166,10 +173,99 @@ def venv_python(repo_root: Path, platform: str) -> Path:
 
 
 def linux_apt_packages(tier_id: str) -> list[str]:
-    packages = ["python3-tk", "python3-venv", "python3-pip"]
+    packages = ["python3-tk", "python3-venv", "python3-pip", "binutils"]
     if tier_id == "D":
         packages.extend(["wmctrl", "xdotool"])
     return packages
+
+
+def bundled_executable(repo_root: Path, platform: str) -> Path:
+    """One PyInstaller file. Windows adds the .exe suffix."""
+    name = "MYKRO.exe" if platform == "windows" else "MYKRO"
+    return repo_root / "dist" / name
+
+
+def parse_yes_no(text: str) -> bool | None:
+    token = str(text or "").strip().lower().strip(".")
+    if token in {"y", "yes"}:
+        return True
+    if token in {"n", "no"}:
+        return False
+    return None
+
+
+def prompt_desktop_icon(input_fn: InputFn, print_fn: Printer) -> bool | None:
+    print_fn("Create a desktop icon for MYKRO? Type y or n.")
+    for _attempt in range(3):
+        try:
+            raw = input_fn("> ")
+        except EOFError:
+            return None
+        choice = parse_yes_no(raw)
+        if choice is not None:
+            return choice
+        print_fn("Type y or n.")
+    return None
+
+
+def linux_desktop_directory(home: Path) -> Path:
+    config = home / ".config" / "user-dirs.dirs"
+    if config.is_file():
+        try:
+            lines = config.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped.startswith("XDG_DESKTOP_DIR="):
+                continue
+            value = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+            value = value.replace("${HOME}", str(home)).replace("$HOME", str(home))
+            return Path(value).expanduser()
+    return home / "Desktop"
+
+
+def linux_desktop_entry(executable: Path, icon: Path | None) -> str:
+    lines = [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=MYKRO",
+        "Comment=Local-first AI harness",
+        f"Exec={executable}",
+    ]
+    if icon is not None:
+        lines.append(f"Icon={icon}")
+    lines.extend(["Terminal=true", "Categories=Utility;"])
+    return "\n".join(lines) + "\n"
+
+
+def write_linux_desktop_files(home: Path, executable: Path, icon: Path | None = None) -> Path:
+    text = linux_desktop_entry(executable, icon)
+    desktop = linux_desktop_directory(home)
+    desktop.mkdir(parents=True, exist_ok=True)
+    path = desktop / "MYKRO.desktop"
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+    apps = home / ".local" / "share" / "applications"
+    apps.mkdir(parents=True, exist_ok=True)
+    app = apps / "MYKRO.desktop"
+    app.write_text(text, encoding="utf-8")
+    app.chmod(0o755)
+    return path
+
+
+def windows_shortcut_command(repo_root: Path, executable: Path) -> list[str]:
+    script = repo_root / "tools" / "create_mykro_shortcut.ps1"
+    return [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script),
+        "-TargetPath",
+        str(executable),
+    ]
 
 
 def apt_command(packages: list[str], *, root: bool) -> list[str]:
@@ -195,6 +291,10 @@ def format_plan(plan: SetupPlan) -> str:
         lines.append("Ollama install: " + " ".join(plan.install_ollama))
     lines.append("Server: " + " ".join(plan.serve))
     lines.append("Download: " + " ".join(plan.pull))
+    lines.append("PyInstaller: " + " ".join(plan.pip_build))
+    lines.append("Build: " + " ".join(plan.build))
+    lines.append("Executable: " + plan.executable)
+    lines.append("Desktop icon: " + ("yes" if plan.desktop_icon else "no"))
     lines.append("Launch: " + " ".join(plan.launch))
     return "\n".join(lines)
 
@@ -208,6 +308,7 @@ def build_plan(
     ollama_path: str | None,
     venv_ready: bool,
     root: bool = False,
+    desktop_icon: bool = False,
 ) -> SetupPlan | SetupRefusal:
     """Commands for one tier. An empty list is a step this machine can skip."""
     choice = parse_tier(tier_id)
@@ -228,6 +329,7 @@ def build_plan(
 
     interpreter = venv_python(repo_root, platform_name)
     ollama = ollama_path or "ollama"
+    executable = bundled_executable(repo_root, platform_name)
     pip_commands = [[str(interpreter), "-m", "pip", "install", "-r", "requirements.txt"]]
     if platform_name == "linux":
         pip_commands.append([str(interpreter), "-m", "pip", "install", "-r", "requirements-linux.txt"])
@@ -246,7 +348,12 @@ def build_plan(
         ollama=ollama,
         serve=[ollama, "serve"],
         pull=[ollama, "pull", tier.model],
-        launch=[str(interpreter), str(repo_root / "orch.py")],
+        pip_build=[str(interpreter), "-m", "pip", "install", "-r", "requirements-build.txt"],
+        build=[str(interpreter), str(repo_root / "build_exe.py")],
+        executable=str(executable),
+        desktop_icon=bool(desktop_icon),
+        repo_root=str(repo_root),
+        launch=[str(executable)],
         endpoint=OLLAMA_CHAT,
     )
 
@@ -319,6 +426,29 @@ def save_tier_choice(config_path: Path, plan: SetupPlan) -> None:
     config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+def _ensure_executable(plan: SetupPlan) -> None:
+    if plan.platform != "linux":
+        return
+    path = Path(plan.executable)
+    if not path.is_file():
+        return
+    path.chmod(path.stat().st_mode | 0o755)
+
+
+def place_desktop_icon(plan: SetupPlan, *, home: Path | None = None) -> tuple[bool, str]:
+    """Windows shortcut or Linux .desktop file. No cloud service is contacted."""
+    exe = Path(plan.executable)
+    root = Path(plan.repo_root)
+    icon = root / "tools" / "mykro_icon.ico"
+    icon_path = icon if icon.is_file() else None
+    if plan.platform == "linux":
+        path = write_linux_desktop_files(home or Path.home(), exe, icon_path)
+        return True, str(path)
+    if plan.platform != "windows":
+        return False, "Desktop icons are created on Windows and Linux."
+    return default_runner(windows_shortcut_command(root, exe))
+
+
 def execute_plan(
     plan: SetupPlan,
     *,
@@ -333,8 +463,9 @@ def execute_plan(
     serve_timeout: float = 30.0,
     print_fn: Printer | None = None,
     do_launch: bool = True,
+    place_icon: Callable[[SetupPlan], tuple[bool, str]] | None = None,
 ) -> SetupResult:
-    """Run install, download, server start, config write, and launch."""
+    """Run install, download, build, optional desktop icon, and launch."""
     say = print_fn or (lambda text: print(text, flush=True))
     pause = sleeper or time.sleep
     now = clock or time.monotonic
@@ -362,6 +493,12 @@ def execute_plan(
                 break
         if not pip_ok:
             return SetupResult(False, pip_detail or "Could not install Python packages.")
+
+    if plan.pip_build:
+        say("Installing PyInstaller…")
+        ok, detail = run(plan.pip_build)
+        if not ok:
+            return SetupResult(False, detail or "Could not install PyInstaller.")
 
     ollama = plan.ollama
     if plan.install_ollama:
@@ -395,8 +532,22 @@ def execute_plan(
 
     save_tier_choice(config_path, plan)
     say(f"Saved {plan.model} for local chat. No cloud API key.")
+
+    say("Building MYKRO…")
+    ok, detail = run(plan.build)
+    if not ok:
+        return SetupResult(False, detail or "Could not build MYKRO.")
+    _ensure_executable(plan)
+    if plan.desktop_icon:
+        say("Creating a desktop icon…")
+        try:
+            icon_ok, icon_detail = (place_icon or place_desktop_icon)(plan)
+        except OSError as exc:
+            icon_ok, icon_detail = False, str(exc)
+        if not icon_ok:
+            say(icon_detail or "Could not create the desktop icon.")
     if not do_launch or launch is None:
-        return SetupResult(True, "MYKRO is configured.", launched=False)
+        return SetupResult(True, "MYKRO is built.", launched=False)
     say("Starting MYKRO…")
     code = int(launch(list(plan.launch)))
     if code != 0:
@@ -407,7 +558,13 @@ def execute_plan(
 def default_runner(argv: list[str]) -> tuple[bool, str]:
     import subprocess
 
-    timeout = 3600 if len(argv) >= 2 and argv[1] == "pull" else 900
+    joined = " ".join(argv)
+    if "build_exe.py" in joined:
+        timeout = 1800
+    elif "pull" in argv:
+        timeout = 3600
+    else:
+        timeout = 900
     try:
         completed = subprocess.run(
             argv,
@@ -457,9 +614,32 @@ def _stdin_is_tty() -> bool:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Set up a local MYKRO model and start the app.")
     parser.add_argument("--tier", default="", help="A, B, C, or D. Skips the menu.")
-    parser.add_argument("--no-launch", action="store_true", help="Install and download, then stop before the window.")
+    parser.add_argument("--icon", action="store_true", help="Create a desktop icon without asking.")
+    parser.add_argument("--no-icon", action="store_true", help="Skip the desktop icon question.")
+    parser.add_argument("--no-launch", action="store_true", help="Build MYKRO, then stop before opening it.")
     parser.add_argument("--dry-run", action="store_true", help="Print the commands and do not run them.")
     return parser
+
+
+def choose_desktop_icon(
+    *,
+    icon: bool,
+    no_icon: bool,
+    interactive: bool,
+    input_fn: InputFn | None,
+    print_fn: Printer,
+) -> bool | None:
+    if icon and no_icon:
+        print_fn("Pass either --icon or --no-icon.")
+        return None
+    if icon:
+        return True
+    if no_icon:
+        return False
+    if not interactive:
+        print_fn("Desktop icon: no. Pass --icon to create one.")
+        return False
+    return prompt_desktop_icon(input_fn or input, print_fn)
 
 
 def main(
@@ -482,6 +662,7 @@ def main(
     sleeper: Sleeper | None = None,
     clock: Clock | None = None,
     serve_timeout: float = 30.0,
+    place_icon: Callable[[SetupPlan], tuple[bool, str]] | None = None,
 ) -> int:
     args = _build_parser().parse_args(list(sys.argv[1:] if argv is None else argv))
     say = print_fn or (lambda text: print(text, flush=True))
@@ -511,7 +692,7 @@ def main(
         ready = venv_ready
     if root is None:
         root = running_as_root()
-    plan = build_plan(
+    draft = build_plan(
         choice,
         platform=platform_name,
         repo_root=root_dir,
@@ -519,10 +700,35 @@ def main(
         ollama_path=ollama_path,
         venv_ready=ready,
         root=bool(root),
+        desktop_icon=False,
     )
-    if isinstance(plan, SetupRefusal):
-        say(plan.message)
+    if isinstance(draft, SetupRefusal):
+        say(draft.message)
         return 2
+    wants_icon = choose_desktop_icon(
+        icon=bool(args.icon),
+        no_icon=bool(args.no_icon),
+        interactive=interactive,
+        input_fn=input_fn,
+        print_fn=say,
+    )
+    if wants_icon is None:
+        return 2
+    plan = draft
+    if wants_icon:
+        plan = build_plan(
+            choice,
+            platform=platform_name,
+            repo_root=root_dir,
+            python=interpreter,
+            ollama_path=ollama_path,
+            venv_ready=ready,
+            root=bool(root),
+            desktop_icon=True,
+        )
+        if isinstance(plan, SetupRefusal):
+            say(plan.message)
+            return 2
     if args.dry_run:
         say(format_plan(plan))
         return 0
@@ -546,6 +752,7 @@ def main(
         serve_timeout=serve_timeout,
         print_fn=say,
         do_launch=not args.no_launch,
+        place_icon=place_icon,
     )
     if not result.ok:
         say(result.message)

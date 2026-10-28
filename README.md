@@ -6,7 +6,7 @@ There is no `MYKRO.exe` to download. GitHub Releases has no files, and GitHub Ac
 
 ## Quick start
 
-Clone the repo, then run one command. The command prints a menu. Pick A, B, C, or D. That choice installs what it needs, downloads a local model, starts the model server, and opens MYKRO.
+Clone the repo, then run one command. It asks you to pick A, B, C, or D, asks whether you want a desktop icon, installs what that choice needs, downloads a local model, builds one MYKRO program, and opens that program.
 
 Windows:
 
@@ -43,44 +43,45 @@ bash setup.sh
 
 A, B, and C work on Windows and Linux. D runs on Linux. On Windows, D tells you to run `bash setup.sh` on a Linux machine. You do not point MYKRO at Ollama, LM Studio, or a `.gguf` yourself for this path.
 
+After the letter, the command asks `Create a desktop icon for MYKRO?` Type `y` or `n`. `y` puts a shortcut on the desktop. `n` skips it. The build still happens either way.
+
 The download is an Ollama model stored on this computer. Setup does not ask for a cloud API key or a Hugging Face token.
 
-A source checkout saves the choice in `gui_flask\config.json` (gitignored). A frozen exe saves `%LOCALAPPDATA%\MYKRO\config.json` on Windows and `~/.local/share/MYKRO/config.json` on Linux. Later launches reuse that model and start Ollama again if its port is down.
+The build is one file: `dist\MYKRO.exe` on Windows and `dist/MYKRO` on Linux. There is no folder of pieces to join, and there is no separate build step. The same command compiles it with PyInstaller and then launches that file.
+
+A source checkout saves the choice in `gui_flask\config.json` (gitignored). The built program saves `%LOCALAPPDATA%\MYKRO\config.json` on Windows and `~/.local/share/MYKRO/config.json` on Linux. Later launches reuse that model and start Ollama again if its port is down.
 
 ```powershell
-python orch.py --version
-python orch.py --self-check
-python orch.py --setup
+.\dist\MYKRO.exe --version
+.\dist\MYKRO.exe --self-check
+.\dist\MYKRO.exe --setup
 ```
+
+On Linux those same flags are `./dist/MYKRO --version`, `--self-check`, and `--setup`.
 
 `--setup` opens the model picker. It does not download a new model. `--version` prints the version and exits. `--self-check` checks imports and the data directory without opening a window.
 
 Python 3.12 is the version the Windows build uses. `setup.ps1` installs it with winget when `python` and `py` are missing. `setup.sh` installs `python3` when it is missing. The desktop window needs tkinter (`python3-tk` on Linux).
 
-## What the menu runs
+## What the one command runs
 
-1. Linux packages when you are on Linux. Every Linux tier installs `python3-tk`, `python3-venv`, and `python3-pip`. D also installs `wmctrl` and `xdotool`, which the Linux window controls use.
+1. Linux packages when you are on Linux. Every Linux tier installs `python3-tk`, `python3-venv`, `python3-pip`, and `binutils`. D also installs `wmctrl` and `xdotool`, which the Linux window controls use.
 2. A `.venv` in the repo, then `pip install -r requirements.txt`. On Linux, if that install cannot build `pynput`, setup retries `requirements-linux.txt`.
-3. Ollama, if it is not already installed. Windows uses winget. Linux uses the Ollama install script.
-4. `ollama serve` when nothing is answering on `127.0.0.1:11434`.
-5. `ollama pull` for the tier's model, unless that model is already on disk.
-6. `orch.py` from the virtual environment.
+3. `pip install -r requirements-build.txt`, which installs PyInstaller 6.22.0.
+4. Ollama, if it is not already installed. Windows uses winget. Linux uses the Ollama install script.
+5. `ollama serve` when nothing is answering on `127.0.0.1:11434`.
+6. `ollama pull` for the tier's model, unless that model is already on disk.
+7. `python build_exe.py`, which writes one file: `dist\MYKRO.exe` on Windows or `dist/MYKRO` on Linux.
+8. A desktop icon when you answered `y`. Windows creates `MYKRO Desktop.lnk` on the desktop. Linux writes `MYKRO.desktop` on the desktop and in `~/.local/share/applications`.
+9. Launch that built file.
 
-Non-interactive choice: `python setup.py --tier A`. Add `--no-launch` to stop after the model is saved. `--dry-run` prints the commands and does not run them.
+Non-interactive choice: `python setup.py --tier A --icon` or `--no-icon`. Add `--no-launch` to build the file and stop before opening it. `--dry-run` prints the commands and does not run them.
 
-## Build a Windows exe
+## Build flags
 
-This stays on your machine. Nothing is uploaded.
+The setup command already runs the default one-file build. These flags are for a second build from the repo, not a step end users have to do:
 
-```powershell
-python -m pip install -r requirements-build.txt
-python build_exe.py
-.\dist\MYKRO.exe
-```
-
-`requirements-build.txt` installs PyInstaller 6.22.0. Python does not need to be installed on a PC that only runs that file. `--version`, `--self-check`, and `--setup` work on `.\dist\MYKRO.exe`.
-
-- `python build_exe.py` and `python build_exe.py --launcher` build `dist\MYKRO.exe`
+- `python build_exe.py` and `python build_exe.py --launcher` build `dist\MYKRO.exe` on Windows and `dist/MYKRO` on Linux
 - `python build_exe.py --desktop` builds `dist\mykro-desktop.exe` from the Tkinter entry
 - `python build_exe.py --launcher --desktop` builds both
 - `python build_exe.py --onedir` writes the older folder layout
@@ -89,9 +90,7 @@ python build_exe.py
 
 The build helper copies a minimized `gui_flask/` data tree into a temporary packaging directory and excludes runtime logs, cache folders, and `config.json`. Generated build output is ignored by `.gitignore`.
 
-If PyInstaller cannot be installed, `.\tools\build_fallback.ps1 -CreateShortcuts` writes batch launchers and desktop shortcuts. Those are not real `.exe` files.
-
-After `python build_exe.py`, `.\tools\create_mykro_shortcut.ps1` places a `MYKRO Desktop.lnk` shortcut on your desktop. It defaults to `dist\MYKRO.exe`.
+If PyInstaller cannot be installed, `.\tools\build_fallback.ps1 -CreateShortcuts` writes batch launchers and desktop shortcuts. Those are not real `.exe` files. The setup command does not use that fallback.
 
 ## Tests
 

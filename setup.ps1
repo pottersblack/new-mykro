@@ -1,4 +1,4 @@
-# One command after clone. Presents A / B / C / D, then starts MYKRO.
+# One command after clone: A / B / C / D, desktop icon, build MYKRO.exe, launch it.
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
