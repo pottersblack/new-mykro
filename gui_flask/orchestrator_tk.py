@@ -318,6 +318,20 @@ class ConfigManager:
             node[path[-1]] = value
             self._write(root)
 
+    def reload(self) -> None:
+        """Read the file from disk even when the mtime looks unchanged."""
+        if not self.path.is_file():
+            return
+        try:
+            loaded = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            return
+        if not isinstance(loaded, dict):
+            return
+        with self.lock:
+            self._data = {str(key): value for key, value in loaded.items()}
+            self._mtime_ns = self._read_mtime_ns()
+
     def reload_if_changed(self) -> bool:
         """Reload config.json when it changed externally. Returns True when data changed."""
         current_mtime = self._read_mtime_ns()
@@ -6546,11 +6560,8 @@ def main() -> None:
         return False, f"{server_name} did not open port {port} within {int(timeout)}s.", True
 
     def _run_autoconfig_phase(startup_cfg: JsonObject) -> bool:
-        if not bool(startup_cfg.get("autoconfig_on_launch", True)):
-            _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "skipped", "autoconfig_on_launch is disabled")
-            return True
-
-        _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "starting", "autoconfig running")
+        startup_cfg["autoconfig_on_launch"] = True
+        _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "starting", "autoconfig_on_launch enabled")
         result = run_autoconfig(config_path=config_path, python_executable=sys.executable)
         if not bool(result.get("ok")):
             detail = str(result.get("message") or "Autoconfig failed.")
@@ -6579,6 +6590,18 @@ def main() -> None:
     def _auto_establish_runtime() -> None:
         """Boot model/backend/web dependencies with deterministic autoconfig-first phases."""
         _emit_startup_message("Boot sequence: deterministic startup phases engaged…")
+
+        # Rewrite the user config before any phase can treat autoconfig as off.
+        try:
+            try:
+                from boot_config import boot_config_file
+            except ImportError:
+                from gui_flask.boot_config import boot_config_file
+            for line in boot_config_file(Path(hub.config.path)):
+                _emit_startup_message(line)
+            hub.config.reload()
+        except Exception:
+            logger.exception("Could not enable autoconfig in the user config")
 
         # Phase 0: load/repair startup policy defaults
         startup_cfg = _resolve_startup_policy()
@@ -6641,16 +6664,9 @@ def main() -> None:
         except (TypeError, ValueError):
             gw_port = 8090
 
-        setup_cfg = _normalize_dict(hub.config.get("setup", {}))
-        external_backend = bool(setup_cfg.get("use_external_backend"))
         gateway_server = _get_server_config_by_name("MYKRO Gateway")
-        if external_backend or gateway_server is None:
-            reason = (
-                "selected local model does not use the MYKRO gateway"
-                if external_backend
-                else "MYKRO Gateway is not configured"
-            )
-            _emit_startup_phase(4, "start gateway", "skipped", reason)
+        if gateway_server is None:
+            _emit_startup_phase(4, "start gateway", "skipped", "MYKRO Gateway is not configured")
         elif not _is_tcp_port_open(gw_host, gw_port):
             _emit_startup_phase(4, "start gateway", "starting", f"gateway not reachable on {gw_host}:{gw_port}; attempting start")
             ok, msg, started = _ensure_configured_server_running("MYKRO Gateway", startup_cfg)

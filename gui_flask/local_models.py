@@ -462,17 +462,12 @@ def _gateway_python(explicit: str | None = None) -> str | None:
     return None
 
 
-def _merge_gateway_server(servers: list[Any], python_exe: str, cwd: Path) -> list[Any]:
-    entry = {
-        "name": "MYKRO Gateway",
-        "exe": python_exe,
-        "args": ["gateway.py"],
-        "cwd": str(cwd),
-    }
+def _merge_named_server(servers: list[Any], entry: dict[str, Any]) -> list[Any]:
+    wanted = str(entry.get("name") or "").strip().lower()
     merged: list[Any] = []
     replaced = False
     for item in servers:
-        if isinstance(item, dict) and str(item.get("name") or "").strip().lower() == "mykro gateway":
+        if isinstance(item, dict) and str(item.get("name") or "").strip().lower() == wanted:
             combined = {str(key): value for key, value in item.items()}
             combined.update(entry)
             merged.append(combined)
@@ -482,6 +477,18 @@ def _merge_gateway_server(servers: list[Any], python_exe: str, cwd: Path) -> lis
     if not replaced:
         merged.append(entry)
     return merged
+
+
+def _merge_gateway_server(servers: list[Any], python_exe: str, cwd: Path) -> list[Any]:
+    return _merge_named_server(
+        servers,
+        {
+            "name": "MYKRO Gateway",
+            "exe": python_exe,
+            "args": ["gateway.py"],
+            "cwd": str(cwd),
+        },
+    )
 
 
 def adopt_package_model(config_path: Path) -> None:
@@ -585,12 +592,30 @@ def apply_choice(config_path: Path, model: DiscoveredModel, *, python_executable
         endpoints["mykro-small"] = {"endpoint": model.endpoint, "context_size": 4096, "max_tokens": 1024}
         endpoints["mykro-auto"] = {"endpoint": model.endpoint, "context_size": 8192, "max_tokens": 2048}
         config["endpoints"] = endpoints
+        servers = config.get("servers")
+        if not isinstance(servers, list):
+            servers = []
         python_exe = _gateway_python(python_executable)
         if python_exe:
-            servers = config.get("servers")
-            if not isinstance(servers, list):
-                servers = []
-            config["servers"] = _merge_gateway_server(servers, python_exe, package_dir())
+            servers = _merge_gateway_server(servers, python_exe, package_dir())
+        if model.backend == "ollama":
+            import shutil
+
+            try:
+                ollama_exe = shutil.which("ollama") or shutil.which("ollama.exe")
+            except (AttributeError, OSError):
+                ollama_exe = None
+            if ollama_exe:
+                servers = _merge_named_server(
+                    servers,
+                    {
+                        "name": "Ollama",
+                        "exe": ollama_exe,
+                        "args": ["serve"],
+                        "cwd": str(package_dir().parent),
+                    },
+                )
+        config["servers"] = servers
     else:
         model_cfg["type"] = "gguf"
         model_cfg["endpoint"] = ""
@@ -851,11 +876,13 @@ def run_self_check() -> int:
 
     try:
         try:
+            import gui_flask.boot_config  # noqa: F401
             import gui_flask.launch_autoconfig  # noqa: F401
             import gui_flask.linux_control  # noqa: F401
             import gui_flask.setup_menu  # noqa: F401
             import gui_flask.win_control  # noqa: F401
         except ImportError:
+            import boot_config  # noqa: F401
             import launch_autoconfig  # noqa: F401
             import linux_control  # noqa: F401
             import setup_menu  # noqa: F401

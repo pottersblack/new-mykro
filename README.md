@@ -49,9 +49,14 @@ The download is an Ollama model stored on this computer. Setup does not ask for 
 
 The build is one file: `dist\MYKRO.exe` on Windows and `dist/MYKRO` on Linux. There is no folder of pieces to join, and there is no separate build step. The same command compiles it with PyInstaller and then launches that file.
 
-Setup writes a complete config to `%LOCALAPPDATA%\MYKRO\config.json` on Windows and `~/.local/share/MYKRO/config.json` on Linux, and keeps the same file at `gui_flask\config.json` for a source checkout. That config turns `autoconfig_on_launch` on, stores the Ollama endpoint and the model you picked, and points the MYKRO gateway at that model. The next launch creates a missing config instead of leaving autoconfig off, starts Ollama if its port is down, and chat uses that model without the Start button.
+Boot and setup read and write one file:
 
-A fresh launch with no config file creates one with autoconfig enabled. GitHub Releases still has no download.
+- Windows: `%LOCALAPPDATA%\MYKRO\config.json`
+- Linux: `~/.local/share/MYKRO/config.json`
+
+A source checkout and `dist\MYKRO.exe` both use that path. `gui_flask\config.json` is not the file the window reads. After A, B, or C, and again on every launch, that file is healed even when `setup.completed` is already true. It must contain `startup.autoconfig_on_launch` true, `startup.autofix_gateway_deps` true, `startup.server_mode` `all`, `setup.use_external_backend` false, `model.endpoint` `http://127.0.0.1:11434/v1/chat/completions`, `model.model_name` set to the picked model, `model.default_server` `MYKRO Gateway`, `gateway.host` `127.0.0.1`, `gateway.port` `8090`, `gateway.large_model` pointed at that Ollama model, and a non-empty `servers` list with `MYKRO Gateway`. The next launch logs `autoconfig_on_launch enabled` and the path it read. Chat uses that model without the Start button. No API key is written.
+
+GitHub Releases still has no download.
 
 ```powershell
 .\dist\MYKRO.exe --version

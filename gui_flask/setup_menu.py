@@ -424,6 +424,12 @@ def save_tier_choice(config_path: Path, plan: SetupPlan) -> None:
         model.pop("openai_api_key", None)
         data["model"] = model
     config_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    # completed:true must not keep a broken startup block. Heal again after the tier stamp.
+    try:
+        from gui_flask.boot_config import boot_config_file
+    except ImportError:
+        from boot_config import boot_config_file
+    boot_config_file(config_path)
 
 
 def _ensure_executable(plan: SetupPlan) -> None:

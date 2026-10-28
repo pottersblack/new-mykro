@@ -1021,10 +1021,24 @@ _DOTENV_PATH = Path(WORKSPACE_ROOT) / ".env"
 
 
 def load_config() -> dict:
+    """Read the same user config boot uses, then the package file."""
+    candidates = []
     try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        try:
+            from gui_flask.paths import config_file
+        except ImportError:
+            from paths import config_file
+        candidates.append(config_file())
+    except Exception:
+        pass
+    candidates.append(CONFIG_PATH)
+    for path in candidates:
+        try:
+            if path.is_file():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return {}
 
 
 def resolve_workspace_root(requested_root: str | None) -> str:
