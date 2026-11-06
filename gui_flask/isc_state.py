@@ -29,8 +29,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
-# ── Save location (next to this file) ──────────────────────────────────────
-_DEFAULT_SAVE_PATH = Path(__file__).resolve().parent / "isc_current_seed.json"
+def default_seed_path() -> Path:
+    """Bundled ISC seed. Frozen builds read it from the PyInstaller extract dir."""
+    try:
+        from gui_flask.paths import bundled_resource
+    except ImportError:  # gui_flask/ is on sys.path, including the frozen exe
+        from paths import bundled_resource
+    return bundled_resource("isc_current_seed.json")
+
+
+# Resolved on each use so a frozen exe sees sys._MEIPASS after import.
+_DEFAULT_SAVE_PATH = default_seed_path()
 
 # ── MYKRO invariants & identity anchors (loaded into the seed) ─────────────
 _MYKRO_INVARIANTS = [
@@ -122,8 +131,8 @@ class ISCState:
             "drift_telemetry": self.drift_telemetry,
         }
 
-    def save(self, filepath: str | Path = _DEFAULT_SAVE_PATH):
-        path = Path(filepath)
+    def save(self, filepath: str | Path | None = None):
+        path = Path(filepath) if filepath else default_seed_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2)
@@ -296,7 +305,7 @@ class ISCManager:
 
     def __init__(self, session_id: Optional[str] = None, save_path: Optional[Path] = None):
         self._lock = threading.Lock()
-        self._save_path = Path(save_path) if save_path else _DEFAULT_SAVE_PATH
+        self._save_path = Path(save_path) if save_path else default_seed_path()
         sid = session_id or ("MYKRO-" + uuid.uuid4().hex[:12].upper())
         self._state = _make_seed(sid)
         self._hub = None  # injected lazily

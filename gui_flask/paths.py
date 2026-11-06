@@ -60,6 +60,26 @@ def package_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def bundled_resource(*relative_parts: str) -> Path:
+    """Find a read-only file shipped inside MYKRO.
+
+    Source runs keep these files next to the package. A PyInstaller onefile
+    build extracts ``--add-data`` under ``sys._MEIPASS/gui_flask``. The frozen
+    gateway imports ``hub`` as a top-level module, so ``hub.__file__`` is the
+    archive root and does not sit next to those JSON files. Check the package
+    directory first, then the archive root.
+    """
+    relative = Path(*relative_parts)
+    candidates = [package_dir() / relative, resource_root() / relative]
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
+    return candidates[0]
+
+
 def config_file(app_name: str = "MYKRO") -> Path:
     """The one config boot and setup both use.
 
