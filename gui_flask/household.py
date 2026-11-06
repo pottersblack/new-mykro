@@ -253,7 +253,7 @@ def chat():
 @app.route("/api/config")
 def config():
     """Return server configuration flags (e.g. single_user mode)."""
-    return jsonify({"single_user": _SINGLE_USER})
+    return jsonify({"single_user": _SINGLE_USER, "service": "mykro-household", "product": "MYKRO"})
 
 
 @app.route("/api/models")
@@ -424,7 +424,8 @@ def _stop_mdns() -> None:
 
 
 # ── Main ────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
+def serve(argv: list[str] | None = None) -> None:
+    """Run household chat. ``argv`` is the argument list without the program name."""
     parser = argparse.ArgumentParser(description="MYKRO Household Chat Server")
     parser.add_argument("--port", type=int, default=5001)
     parser.add_argument("--host", default="0.0.0.0")
@@ -432,7 +433,8 @@ if __name__ == "__main__":
                         help="Custom .local hostname (e.g. 'mykro' -> http://mykro.local:5001)")
     parser.add_argument("--single-user", action="store_true",
                         help="Only allow one chat session at a time (returns 429 if busy)")
-    args = parser.parse_args()
+    global _SINGLE_USER
+    args = parser.parse_args(argv)
 
     _SINGLE_USER = args.single_user
     if _SINGLE_USER:
@@ -451,3 +453,7 @@ if __name__ == "__main__":
         app.run(host=args.host, port=args.port, debug=False, threaded=True)
     finally:
         _stop_mdns()
+
+
+if __name__ == "__main__":
+    serve()

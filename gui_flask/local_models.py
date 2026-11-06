@@ -167,39 +167,16 @@ def _names_from_ollama(payload: JsonObject) -> list[str]:
 
 
 def gguf_search_roots() -> list[Path]:
-    """Known folders that often hold .gguf weights. The whole disk is not scanned."""
-    roots: list[Path] = [
-        package_dir().parent / "model",
-        Path.cwd() / "model",
-        data_dir() / "models",
-    ]
-    home = Path.home()
-    roots.extend(
-        [
-            home / "models",
-            home / "Models",
-            home / ".cache" / "lm-studio" / "models",
-            home / ".lmstudio" / "models",
-            home / ".ollama" / "models",
-        ]
-    )
-    local = os.environ.get("LOCALAPPDATA")
-    if local:
-        roots.append(Path(local) / "llama.cpp")
-        roots.append(Path(local) / "LM Studio")
-    profile = os.environ.get("USERPROFILE")
-    if profile:
-        roots.append(Path(profile) / "models")
-        roots.append(Path(profile) / "AppData" / "Local" / "llama.cpp")
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for root in roots:
-        key = str(root).casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(root)
-    return unique
+    """Known folders that often hold .gguf weights. Whole drives are scanned separately."""
+    try:
+        from gui_flask.platform_autoconfig import known_model_roots
+    except ImportError:
+        from platform_autoconfig import known_model_roots
+    roots = known_model_roots()
+    cwd_model = Path.cwd() / "model"
+    if str(cwd_model).casefold() not in {str(path).casefold() for path in roots}:
+        roots.append(cwd_model)
+    return roots
 
 
 def scan_gguf_files(roots: list[Path]) -> list[Path]:
@@ -838,6 +815,41 @@ def dispatch_argv(argv: list[str]) -> int | None:
         return 0
     if "--self-check" in args:
         return run_self_check()
+    if "--get-model" in args:
+        try:
+            from gui_flask.platform_autoconfig import download_default_model
+        except ImportError:
+            from platform_autoconfig import download_default_model
+        try:
+            saved = download_default_model()
+        except OSError as exc:
+            print(f"MYKRO could not download the small default model: {exc}")
+            return 1
+        print(f"MYKRO saved a small default model at {saved}")
+        print("Run MYKRO again so autoconfig can serve it.")
+        return 0
+    if "--run-gateway" in args:
+        try:
+            from gui_flask.gateway import serve as serve_gateway
+        except ImportError:
+            from gateway import serve as serve_gateway
+        serve_gateway()
+        return 0
+    if "--run-web" in args:
+        try:
+            from gui_flask.web_ui import serve as serve_web
+        except ImportError:
+            from web_ui import serve as serve_web
+        serve_web()
+        return 0
+    if "--run-household" in args:
+        forwarded = [item for item in args if item != "--run-household"]
+        try:
+            from gui_flask.household import serve as serve_household
+        except ImportError:
+            from household import serve as serve_household
+        serve_household(forwarded)
+        return 0
     return None
 
 
@@ -879,12 +891,14 @@ def run_self_check() -> int:
             import gui_flask.boot_config  # noqa: F401
             import gui_flask.launch_autoconfig  # noqa: F401
             import gui_flask.linux_control  # noqa: F401
+            import gui_flask.platform_autoconfig  # noqa: F401
             import gui_flask.setup_menu  # noqa: F401
             import gui_flask.win_control  # noqa: F401
         except ImportError:
             import boot_config  # noqa: F401
             import launch_autoconfig  # noqa: F401
             import linux_control  # noqa: F401
+            import platform_autoconfig  # noqa: F401
             import setup_menu  # noqa: F401
             import win_control  # noqa: F401
     except Exception as exc:

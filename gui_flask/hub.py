@@ -24,6 +24,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, cast
 
+try:
+    from gui_flask.paths import bundled_resource
+except ImportError:  # frozen gateway imports this file as top-level hub
+    from paths import bundled_resource
+
 
 @dataclass
 class WireEntry:
@@ -298,10 +303,9 @@ class CircuitRegistry:
     def __init__(self, registry_path: Optional[str] = None, quarantine_dir: Optional[str] = None):
         self._lock = threading.Lock()
         if registry_path is None:
-            registry_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                "circuit_registry.json",
-            )
+            # Beside this module in a source tree. In a frozen exe, hub.py is
+            # at the archive root and the JSON is under _MEIPASS/gui_flask.
+            registry_path = str(bundled_resource("circuit_registry.json"))
         self._path = registry_path
         self._circuits: dict[str, CircuitEntry] = {}
 

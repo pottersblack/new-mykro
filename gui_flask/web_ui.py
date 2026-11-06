@@ -592,11 +592,36 @@ def _register_web_ui_wires():
     logger.info('wire_registered route=web_ui->gateway endpoint=%s', gateway_url)
 
 
-def load_config():
+def active_config_path() -> Path:
+    """The user file wins when it exists. The package file is only the seed."""
+    override = os.environ.get("MYKRO_CONFIG", "").strip()
+    if override:
+        return Path(override).expanduser()
     try:
-        return json.loads(CONFIG_PATH.read_text(encoding='utf-8'))
+        from gui_flask.paths import data_dir
+    except ImportError:
+        from paths import data_dir
+    user_file = data_dir() / "config.json"
+    if user_file.is_file():
+        return user_file
+    return CONFIG_PATH
+
+
+def load_config():
+    path = active_config_path()
+    try:
+        raw = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def web_bind_port() -> int:
+    try:
+        startup = load_config().get("startup", {})
+        return int(float(startup.get("web_ui_port", 5000))) if isinstance(startup, dict) else 5000
+    except (TypeError, ValueError, AttributeError):
+        return 5000
 
 
 def get_gateway_base_url():
@@ -1086,6 +1111,12 @@ def api_models():
     ], 'active': 'mykro-auto'})
 
 
+@app.route('/api/ping')
+def api_ping():
+    """Identify this process as MYKRO so a busy port is reused instead of duplicated."""
+    return jsonify({'ok': True, 'service': 'mykro-web', 'product': 'MYKRO', 'port': web_bind_port()})
+
+
 @app.route('/api/health')
 def api_health():
     """Report backend status. Always JSON, including when nothing is listening.
@@ -1101,9 +1132,10 @@ def api_health():
     if legacy_code == 200:
         return (legacy_text, legacy_code, {'Content-Type': legacy_ctype})
     return jsonify({
+        'service': 'mykro-web',
         'gateway': 'unreachable',
         'models': {},
-        'hint': 'Start MYKRO Gateway (start-all.ps1 -NoGUI) or a model server, then retry.',
+        'hint': 'Start the MYKRO gateway, or press Autoconfig. If no model is installed, run MYKRO --get-model.',
     })
 
 
@@ -1204,8 +1236,8 @@ def api_services_status():
             'pid': os.getpid(),
             'reachable': True,
             'detail': 'self',
-            'port': 5000,
-            'url': 'http://127.0.0.1:5000',
+            'port': web_bind_port(),
+            'url': f'http://127.0.0.1:{web_bind_port()}',
             'status': 'online',
         },
         'model_server': {
@@ -1538,8 +1570,14 @@ def api_memories_search():
 
 @app.route('/api/autoconfig', methods=['POST'])
 def web_autoconfig():
-    """Run shared MYKRO autoconfig and persist updates into config.json."""
-    result = run_autoconfig(config_path=CONFIG_PATH)
+    """Run shared MYKRO autoconfig against the config file that wins."""
+    try:
+        from gui_flask.paths import config_file
+        from gui_flask.platform_autoconfig import production_autoconfig_kwargs
+    except ImportError:
+        from paths import config_file
+        from platform_autoconfig import production_autoconfig_kwargs
+    result = run_autoconfig(config_path=config_file(), **production_autoconfig_kwargs())
     if not bool(result.get('ok')):
         return jsonify({
             'status': 'error',
@@ -1640,7 +1678,7 @@ def _save_node_to_config(name: str, ip: str, token: str) -> None:
                 break
         else:
             nodes.append({"name": name, "url": f"http://{ip}:8095", "token": token, "enabled": True})
-        CONFIG_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        active_config_path().write_text(json.dumps(cfg, indent=2), encoding="utf-8")
     except (OSError, ValueError):
         pass
 
@@ -1763,14 +1801,20 @@ def deploy_node_register():
     return jsonify({"ok": True, "registered": name, "ip": node_ip, "port": port})
 
 
-if __name__ == '__main__':
+def serve() -> None:
+    """Run the web UI on startup.web_ui_port from the winning config."""
     _register_web_ui_wires()
+    port = web_bind_port()
     _debug = os.environ.get('MYKRO_NO_DEBUG') != '1'
     logger.info(
-        'startup_summary web_ui_host=0.0.0.0 web_ui_port=5000 debug=%s gateway=%s config=%s',
+        'startup_summary web_ui_host=0.0.0.0 web_ui_port=%s debug=%s gateway=%s config=%s',
+        port,
         _debug,
         get_gateway_base_url(),
-        CONFIG_PATH,
+        active_config_path(),
     )
-    # Bind to 0.0.0.0 so LAN machines (e.g. the M70q) can reach the deploy page
-    app.run(host='0.0.0.0', port=5000, debug=_debug)
+    app.run(host='0.0.0.0', port=port, debug=_debug)
+
+
+if __name__ == '__main__':
+    serve()
