@@ -49,7 +49,9 @@ def test_ethan_config_is_healed_on_boot_even_though_setup_is_completed(tmp_path:
     assert saved["startup"]["server_mode"] == "all"
     assert saved["setup"]["use_external_backend"] is False
     assert saved["model"]["model_name"] == "mistral:latest"
-    assert saved["model"]["endpoint"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert saved["model"]["upstream_endpoint"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert saved["model"]["endpoint"] == "http://127.0.0.1:8090/v1/chat/completions"
+    assert saved["model"]["type"] == "gateway"
     assert saved["model"]["default_server"] == "MYKRO Gateway"
     assert saved["servers"]
     assert any(item.get("name") == "MYKRO Gateway" for item in saved["servers"])

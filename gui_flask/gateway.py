@@ -1356,17 +1356,29 @@ async def lifespan(application: FastAPI):
         except OSError:
             return False
 
-    if not _port_listening(5000):
-        log.info("Web UI not detected on port 5000 — auto-starting web_ui.py …")
+    def _configured_web_port() -> int:
+        try:
+            startup = load_config().get("startup", {})
+            return int(float(startup.get("web_ui_port", 5000))) if isinstance(startup, dict) else 5000
+        except (TypeError, ValueError, AttributeError):
+            return 5000
+
+    web_port = _configured_web_port()
+    if os.environ.get("MYKRO_GATEWAY_NO_WEB", "").strip() == "1":
+        log.info("Web UI autostart skipped because MYKRO_GATEWAY_NO_WEB is set.")
+    elif not _port_listening(web_port):
+        frozen = bool(getattr(_sys, "frozen", False))
+        command = [_sys.executable, "--run-web"] if frozen else [_sys.executable, "web_ui.py"]
+        log.info("Web UI not detected on port %s — starting %s", web_port, " ".join(command))
         _subprocess.Popen(
-            [_sys.executable, "web_ui.py"],
+            command,
             cwd=str(Path(__file__).resolve().parent),
             env={**os.environ, "MYKRO_NO_DEBUG": "1"},
             stdout=_subprocess.DEVNULL,
             stderr=_subprocess.DEVNULL,
         )
     else:
-        log.info("Web UI already running on port 5000 — skipping auto-start.")
+        log.info("Web UI already running on port %s — reusing it.", web_port)
 
     # ── Background initial wire health-check ────────────────────────────
 
@@ -2642,6 +2654,12 @@ async def chat_completions(request: Request):
 
         selected_cfg = endpoints[selected_model]
         ep = selected_cfg["endpoint"]
+        if not ep:
+            raise HTTPException(
+                409,
+                "No model yet. The MYKRO gateway is running, but no local model is connected. "
+                "Run MYKRO --get-model to download a small default model, or start Ollama or LM Studio and run Autoconfig.",
+            )
         context_size = selected_cfg.get("context_size", 8192)
         debug_trace["routing"] = {
             "requested_model": model,
@@ -2911,6 +2929,12 @@ async def chat_completions(request: Request):
 
     selected_cfg = endpoints[selected_model]
     ep = selected_cfg["endpoint"]
+    if not ep:
+        raise HTTPException(
+            409,
+            "No model yet. The MYKRO gateway is running, but no local model is connected. "
+            "Run MYKRO --get-model to download a small default model, or start Ollama or LM Studio and run Autoconfig.",
+        )
     context_size = selected_cfg.get("context_size", 8192)
 
     # Build workspace context
@@ -3584,7 +3608,12 @@ async def system_report():
 @app.get("/ping")
 async def ping():
     """Fast liveness probe — no backend checks, instant response."""
-    return {"ok": True, "uptime_s": round(time.time() - _metrics["started_at"], 1)}
+    return {
+        "ok": True,
+        "service": "mykro-gateway",
+        "product": "MYKRO",
+        "uptime_s": round(time.time() - _metrics["started_at"], 1),
+    }
 
 
 @app.post("/emergency_stop")
@@ -4366,10 +4395,20 @@ Respond with ONLY a JSON object (no other text):
         }
 
 
-if __name__ == "__main__":
+def serve() -> None:
+    """Run the gateway on the port stored in the winning config."""
+    import uvicorn
+
     runtime_config = load_config()
-    runtime_gateway_cfg = runtime_config.get("gateway", {})
+    runtime_gateway_cfg = runtime_config.get("gateway", {}) if isinstance(runtime_config, dict) else {}
     host = runtime_gateway_cfg.get("host", "127.0.0.1")
-    port = runtime_gateway_cfg.get("port", 8090)
+    try:
+        port = int(runtime_gateway_cfg.get("port", 8090))
+    except (TypeError, ValueError):
+        port = 8090
     log.info("Starting MYKRO Gateway on %s:%d", host, port)
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+if __name__ == "__main__":
+    serve()

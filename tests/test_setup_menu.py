@@ -220,7 +220,9 @@ def test_execute_installs_pulls_saves_and_launches(tmp_path: Path):
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["model"]["backend"] == "ollama"
     assert saved["model"]["model_name"] == "qwen2.5-coder:1.5b"
-    assert saved["model"]["endpoint"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert saved["model"]["upstream_endpoint"] == "http://127.0.0.1:11434/v1/chat/completions"
+    assert saved["model"]["endpoint"] == "http://127.0.0.1:8090/v1/chat/completions"
+    assert saved["gateway"]["large_model"]["endpoint"] == "http://127.0.0.1:11434/v1/chat/completions"
     assert saved["setup"]["tier"] == "A"
     assert saved["setup"]["requires_cloud_api_key"] is False
     assert "api_key" not in saved

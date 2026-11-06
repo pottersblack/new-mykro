@@ -18,20 +18,30 @@ from pathlib import Path
 try:
     from gui_flask.local_models import (
         DiscoveredModel,
-        _merge_gateway_server,
         apply_choice,
         is_loopback_url,
-        package_dir,
-        repair_startup_policy,
+    )
+    from gui_flask.platform_autoconfig import (
+        autoconfig_opted_out,
+        ensure_gateway_block,
+        ensure_gateway_server,
+        heal_startup,
+        point_client_at_gateway,
+        winning_config_note,
     )
 except ImportError:  # launched with gui_flask/ on sys.path
     from local_models import (
         DiscoveredModel,
-        _merge_gateway_server,
         apply_choice,
         is_loopback_url,
-        package_dir,
-        repair_startup_policy,
+    )
+    from platform_autoconfig import (
+        autoconfig_opted_out,
+        ensure_gateway_block,
+        ensure_gateway_server,
+        heal_startup,
+        point_client_at_gateway,
+        winning_config_note,
     )
 
 
@@ -64,27 +74,22 @@ def _needs_heal(config: dict) -> bool:
 
 
 def _force_gateway_server(data: dict, python_executable: str | None) -> None:
-    servers = data.get("servers")
-    if not isinstance(servers, list):
-        servers = []
-    exe = python_executable or sys.executable
-    data["servers"] = _merge_gateway_server(servers, exe, package_dir())
+    """Record the upstream model on the gateway, then add the gateway server."""
     model = _as_dict(data.get("model"))
-    if not str(model.get("default_server") or "").strip():
-        model["default_server"] = "MYKRO Gateway"
     endpoint = str(model.get("endpoint") or "").strip()
-    gateway = _as_dict(data.get("gateway"))
-    gateway["host"] = str(gateway.get("host") or "127.0.0.1")
-    gateway["port"] = gateway.get("port") or 8090
-    if endpoint:
+    gateway = ensure_gateway_block(data)
+    if endpoint and "/chat/completions" in endpoint:
         large = _as_dict(gateway.get("large_model"))
         large["endpoint"] = endpoint
         large["model_name"] = str(model.get("model_name") or large.get("model_name") or "local")
         large.setdefault("max_tokens", 2048)
         large.setdefault("context_size", 8192)
         gateway["large_model"] = large
-    data["gateway"] = gateway
+        data["gateway"] = gateway
+    if not str(model.get("default_server") or "").strip():
+        model["default_server"] = "MYKRO Gateway"
     data["model"] = model
+    ensure_gateway_server(data, python_executable or sys.executable)
 
 
 def prepare_boot_config(
@@ -98,6 +103,18 @@ def prepare_boot_config(
     ``autoconfig_on_launch`` is enabled. The log never says it is disabled.
     """
     data = {str(key): value for key, value in config.items()} if isinstance(config, dict) else {}
+    startup = _as_dict(data.get("startup"))
+    shown = str(config_path) if config_path is not None else "the MYKRO user config"
+    winner = winning_config_note(Path(shown)) if config_path is not None else winning_config_note(Path("config.json"))
+    if autoconfig_opted_out(startup):
+        startup["autoconfig_on_launch"] = False
+        data["startup"] = startup
+        lines = [
+            f"[Boot P0] load/repair config: {winner} autoconfig stays off because startup.autoconfig_disabled_by_user is true",
+            "[Boot P1] autoconfig endpoints/models/runtime: autoconfig stayed off at the user's request",
+        ]
+        return data, lines
+
     model = _as_dict(data.get("model"))
     endpoint = str(model.get("endpoint") or "").strip()
     backend = str(model.get("backend") or "").strip().lower() or "ollama"
@@ -120,24 +137,23 @@ def prepare_boot_config(
             if isinstance(loaded, dict):
                 data = {str(key): value for key, value in loaded.items()}
     startup = _as_dict(data.get("startup"))
-    repair_startup_policy(startup)
-    startup["autoconfig_on_launch"] = True
-    startup["autofix_gateway_deps"] = True
-    startup["rewrite_invalid_config"] = True
-    if str(startup.get("server_mode") or "").strip().lower() in {"", "off", "none", "disabled"}:
-        startup["server_mode"] = "all"
+    heal_startup(startup)
     data["startup"] = startup
     setup = _as_dict(data.get("setup"))
     setup["use_external_backend"] = False
     setup["requires_cloud_api_key"] = False
     data["setup"] = setup
     data.pop("api_key", None)
-    if endpoint or str(_as_dict(data.get("model")).get("backend") or "").lower() == "ollama":
+    model = _as_dict(data.get("model"))
+    endpoint = str(model.get("endpoint") or "").strip()
+    if endpoint or str(model.get("backend") or "").lower() == "ollama":
         _force_gateway_server(data, python_executable)
-
-    shown = str(config_path) if config_path is not None else "the MYKRO user config"
+        point_client_at_gateway(data)
+    else:
+        ensure_gateway_block(data)
+        ensure_gateway_server(data, python_executable or sys.executable)
     lines = [
-        f"[Boot P0] load/repair config: reading {shown}; autoconfig_on_launch enabled",
+        f"[Boot P0] load/repair config: {winner} autoconfig_on_launch enabled",
         "[Boot P1] autoconfig endpoints/models/runtime: autoconfig_on_launch enabled",
     ]
     return data, lines

@@ -3833,8 +3833,13 @@ class AppGUI(tk.Tk):
         tk.Button(parent, text="Probe Endpoints", command=self._probe_website_endpoints, relief="flat", bg="#1b516f", fg="#dff4ff").pack(fill="x")
 
     @staticmethod
-    def _get_web_ui_base_url() -> str:
-        return "http://127.0.0.1:5000"
+    def _get_web_ui_base_url(self) -> str:
+        startup = _normalize_dict(self.hub.config.get("startup", {}))
+        try:
+            port = int(float(startup.get("web_ui_port", 5000)))
+        except (TypeError, ValueError):
+            port = 5000
+        return f"http://127.0.0.1:{port}"
 
     def _get_neural_web_ui_url(self) -> str:
         """Return the canonical Neural Web UI URL.
@@ -5391,6 +5396,15 @@ class AppGUI(tk.Tk):
         else:
             messages.append({"role": "user", "content": prompt})
         cfg_mgr = getattr(self.hub, "config", None)
+        model_cfg = _normalize_dict(cfg_mgr.get("model", {})) if cfg_mgr is not None else {}
+        if str(model_cfg.get("model_state") or "") == "no_model":
+            offer = model_cfg.get("offer") if isinstance(model_cfg.get("offer"), dict) else {}
+            command = str(offer.get("command") or "MYKRO --get-model")
+            return (
+                "No model yet. The gateway can start, but there is nothing to chat with. "
+                f"Run {command} to download a small default model, "
+                "or put a .gguf file in Downloads and press Autoconfig."
+            )
         settings = _normalize_dict(cfg_mgr.get("settings", {})) if cfg_mgr is not None else {}
         max_tok = int(settings.get("n_predict", 1024))
         temperature = float(settings.get("temperature", 0.4))
@@ -5632,7 +5646,11 @@ class AppGUI(tk.Tk):
         if _is_tcp_port_open(household_host, household_port, timeout=0.4):
             household_ok, household_detail = self._probe_http_ok(f"http://{household_host}:{household_port}/api/config", timeout=1.0)
 
-        web_ui_ok = _is_tcp_port_open("127.0.0.1", 5000, timeout=0.4)
+        try:
+            web_port = int(float(startup_cfg.get("web_ui_port", 5000)))
+        except (TypeError, ValueError):
+            web_port = 5000
+        web_ui_ok = _is_tcp_port_open("127.0.0.1", web_port, timeout=0.4)
 
         model_ports: list[int] = []
         for cfg in self._configured_servers():
@@ -5649,8 +5667,8 @@ class AppGUI(tk.Tk):
                 "name": "web_ui",
                 "reachable": web_ui_ok,
                 "status": "online" if web_ui_ok else "offline",
-                "detail": "port 5000 probe",
-                "port": 5000,
+                "detail": f"port {web_port} probe",
+                "port": web_port,
             },
             "model_server": {
                 "name": "model_server",
@@ -5752,9 +5770,10 @@ class AppGUI(tk.Tk):
 
         before_services, source_before = self._runtime_service_status()
 
+        model_state = str(autoconfig_result.get("model_state") or "")
         default_server_name = str(autoconfig_result.get("default_server") or "").strip()
         required_servers = ["MYKRO Gateway"]
-        if default_server_name:
+        if default_server_name and default_server_name.strip().lower() != "mykro gateway" and model_state != "no_model":
             required_servers.append(default_server_name)
 
         for server_name in required_servers:
@@ -5776,6 +5795,10 @@ class AppGUI(tk.Tk):
                 self._panel_log(f"Autoconfig runtime error: {detail}")
 
         auto_web_ui = self._as_bool(startup_cfg.get("auto_start_web_ui", True), True)
+        try:
+            web_port = int(float(startup_cfg.get("web_ui_port", 5000)))
+        except (TypeError, ValueError):
+            web_port = 5000
         if auto_web_ui:
             current_services, _ = self._runtime_service_status()
             if self._service_is_online(current_services.get("web_ui", {})):
@@ -5787,11 +5810,11 @@ class AppGUI(tk.Tk):
                     web_timeout = float(startup_cfg.get("web_ui_start_timeout_secs", 60))
                 except (TypeError, ValueError):
                     web_timeout = 60.0
-                if _wait_for_port("127.0.0.1", 5000, timeout_seconds=max(1.0, web_timeout), poll_seconds=0.5):
+                if _wait_for_port("127.0.0.1", web_port, timeout_seconds=max(1.0, web_timeout), poll_seconds=0.5):
                     if "web_ui" not in started_now:
                         started_now.append("web_ui")
                 else:
-                    failed.append(f"web_ui: did not open port 5000 within {int(web_timeout)}s")
+                    failed.append(f"web_ui: did not open port {web_port} within {int(web_timeout)}s")
         else:
             intentional_not_started.append("web_ui")
 
@@ -5821,12 +5844,14 @@ class AppGUI(tk.Tk):
 
         after_services, source_after = self._runtime_service_status()
         online_services = [name for name, entry in after_services.items() if self._service_is_online(entry)]
-        runtime_ready = self._service_is_online(after_services.get("gateway", {})) and self._service_is_online(after_services.get("model_server", {}))
+        gateway_online = self._service_is_online(after_services.get("gateway", {}))
+        model_online = self._service_is_online(after_services.get("model_server", {}))
+        runtime_ready = gateway_online and (model_state == "no_model" or model_online)
 
         degraded_items: list[str] = []
-        if not self._service_is_online(after_services.get("gateway", {})):
+        if not gateway_online:
             degraded_items.append("gateway")
-        if not self._service_is_online(after_services.get("model_server", {})):
+        if model_state != "no_model" and not model_online:
             degraded_items.append("model_server")
         degraded_items.extend(failed)
 
@@ -5848,10 +5873,20 @@ class AppGUI(tk.Tk):
     def _on_autoconfig(self) -> None:
         """Auto-detect local model/runtime defaults and ensure runtime readiness."""
         config_path = Path(self.hub.config.path)
-        result = run_autoconfig(config_path=config_path, python_executable=sys.executable)
+        try:
+            from platform_autoconfig import production_autoconfig_kwargs
+        except ImportError:
+            from gui_flask.platform_autoconfig import production_autoconfig_kwargs
+        result = run_autoconfig(
+            config_path=config_path,
+            python_executable=sys.executable,
+            **production_autoconfig_kwargs(),  # type: ignore[arg-type]
+        )
         if not bool(result.get("ok")):
             self._main_chat_log("system", f"autoconfig: {result.get('message', 'failed')}")
             return
+        if str(result.get("model_state") or "") == "no_model":
+            self._main_chat_log("system", str(result.get("message") or "No model yet."))
 
         try:
             self.hub.config.reload_if_changed()
@@ -5943,11 +5978,11 @@ class AppGUI(tk.Tk):
     @staticmethod
     def _status_chip_color(status: str) -> str:
         value = (status or "unknown").strip().lower()
-        if value in {"active", "healthy", "ok", "running", "ready"}:
+        if value in {"active", "healthy", "ok", "running", "ready", "online", "reused"}:
             return "#2ecc71"
-        if value in {"degraded", "booting", "starting", "unknown"}:
+        if value in {"degraded", "booting", "starting", "unknown", "no_model"}:
             return "#f1c40f"
-        if value in {"disconnected", "error", "failed", "tripped", "isolated", "quarantined"}:
+        if value in {"disconnected", "error", "failed", "tripped", "isolated", "quarantined", "offline"}:
             return "#e74c3c"
         return "#7f8c8d"
 
@@ -5955,6 +5990,15 @@ class AppGUI(tk.Tk):
         key = component.strip().lower()
         if key in self._runtime_state:
             self._runtime_state[key] = status
+
+    def publish_runtime_health(self, health: dict[str, str], lines: list[str] | None = None) -> None:
+        """Write probed Gateway / Web UI / Household / Models chips from a health check."""
+        for key, status in health.items():
+            if key in self._runtime_state:
+                self._runtime_state[key] = str(status)
+        for line in lines or []:
+            self._append_timeline_line(self._runtime_history, line)
+        self._render_observability_panels()
 
     @staticmethod
     def _classify_component_from_wire(wire: str) -> str:
@@ -6404,34 +6448,41 @@ def main() -> None:
             pass
 
     def _resolve_startup_policy() -> JsonObject:
+        try:
+            from platform_autoconfig import autoconfig_opted_out, heal_startup
+        except ImportError:
+            from gui_flask.platform_autoconfig import autoconfig_opted_out, heal_startup
         startup_cfg = _normalize_dict(hub.config.get("startup", {}))
-        mutated = False
-        defaults: dict[str, Any] = {
-            "server_mode": "all",
-            "auto_start_web_ui": True,
-            "auto_start_household": True,
-            "autoconfig_on_launch": True,
-            "autofix_gateway_deps": True,
-            "rewrite_invalid_config": True,
-        }
-        for key, value in defaults.items():
-            current = startup_cfg.get(key)
-            if key == "server_mode":
-                if str(current or "").strip().lower() in {"", "off", "none", "disabled"}:
-                    startup_cfg[key] = "all"
-                    mutated = True
-                continue
-            if current is not True:
-                startup_cfg[key] = value
-                mutated = True
-
+        if autoconfig_opted_out(startup_cfg):
+            startup_cfg["autoconfig_on_launch"] = False
+            hub.config.set("startup", startup_cfg)
+            _emit_startup_phase(
+                0,
+                "load/repair config",
+                "ok",
+                "autoconfig stays off because startup.autoconfig_disabled_by_user is true",
+            )
+            return startup_cfg
+        before = json.dumps(startup_cfg, sort_keys=True, default=str)
+        _healed, notes = heal_startup(startup_cfg)
+        mutated = json.dumps(startup_cfg, sort_keys=True, default=str) != before
         if mutated:
             hub.config.set("startup", startup_cfg)
             hub.config.reload_if_changed()
             startup_summary["config_repaired"] = True
-            _emit_startup_phase(0, "load/repair config", "ok", "startup defaults repaired", extra={"repairs": list(defaults.keys())})
+            _emit_startup_phase(
+                0,
+                "load/repair config",
+                "ok",
+                "; ".join(notes) or "startup policy turned autoconfig on",
+            )
         else:
-            _emit_startup_phase(0, "load/repair config", "ok", "startup config already healthy")
+            _emit_startup_phase(
+                0,
+                "load/repair config",
+                "ok",
+                "autoconfig_on_launch is on. It stays off only when startup.autoconfig_disabled_by_user is true.",
+            )
         return startup_cfg
 
     def _server_name_from_config(cfg: ServerConfig) -> str:
@@ -6445,7 +6496,9 @@ def main() -> None:
 
         exe_name = Path(exe).name.lower()
         if "python" not in exe_name:
-            return True, "Gateway executable is not Python; skipping dependency check."
+            if exe_name.startswith("mykro") or bool(getattr(sys, "frozen", False)):
+                return True, "Gateway ships inside MYKRO.exe, so its Python dependencies are already bundled."
+            return True, "Gateway executable is not Python; dependency auto-fix has nothing to install."
 
         cwd = Path(str(server_cfg.get("cwd") or workspace))
         requirements = cwd / "requirements.txt"
@@ -6526,10 +6579,24 @@ def main() -> None:
         gateway = [name for name in deduped if name.strip().lower() == "mykro gateway"]
         return non_gateway + gateway
 
-    def _ensure_configured_server_running(server_name: str, startup_cfg: JsonObject) -> tuple[bool, str, bool]:
+    def _ensure_configured_server_running(
+        server_name: str,
+        startup_cfg: JsonObject,
+        port_override: int | None = None,
+    ) -> tuple[bool, str, bool]:
         cfg = _get_server_config_by_name(server_name)
         if cfg is None:
             return False, f"No server config found for '{server_name}'.", False
+
+        ready_url = str(cfg.get("ready_url") or "").strip()
+        if ready_url:
+            from urllib.parse import urlparse
+
+            parsed_ready = urlparse(ready_url)
+            ready_port = parsed_ready.port
+            ready_host = parsed_ready.hostname or "127.0.0.1"
+            if ready_port and _is_tcp_port_open(ready_host, int(ready_port)):
+                return True, f"{server_name} already running at {ready_url}; reusing it instead of starting a second copy.", False
 
         if server_name.strip().lower() == "mykro gateway" and bool(startup_cfg.get("autofix_gateway_deps", True)):
             deps_ok, deps_message = _ensure_gateway_python_deps(cfg)
@@ -6540,9 +6607,9 @@ def main() -> None:
                 startup_summary["dependency_installs_performed"] = int(startup_summary.get("dependency_installs_performed", 0)) + 1
 
         args = _normalize_args(cfg.get("args") or cfg.get("argv") or [])
-        port = _extract_subprocess_port(args)
+        port = port_override if port_override is not None else _extract_subprocess_port(args)
         if port is not None and _is_tcp_port_open("127.0.0.1", port):
-            return True, f"{server_name} already listening on port {port}.", False
+            return True, f"{server_name} already listening on port {port}; reusing it.", False
 
         ok, message = _start_configured_server(server_name)
         if not ok:
@@ -6560,9 +6627,25 @@ def main() -> None:
         return False, f"{server_name} did not open port {port} within {int(timeout)}s.", True
 
     def _run_autoconfig_phase(startup_cfg: JsonObject) -> bool:
+        try:
+            from platform_autoconfig import autoconfig_opted_out, production_autoconfig_kwargs
+        except ImportError:
+            from gui_flask.platform_autoconfig import autoconfig_opted_out, production_autoconfig_kwargs
+        if autoconfig_opted_out(startup_cfg):
+            _emit_startup_phase(
+                1,
+                "autoconfig endpoints/models/runtime",
+                "skipped",
+                "autoconfig stays off because startup.autoconfig_disabled_by_user is true",
+            )
+            return True
         startup_cfg["autoconfig_on_launch"] = True
         _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "starting", "autoconfig_on_launch enabled")
-        result = run_autoconfig(config_path=config_path, python_executable=sys.executable)
+        result = run_autoconfig(
+            config_path=config_path,
+            python_executable=sys.executable,
+            **production_autoconfig_kwargs(),  # type: ignore[arg-type]
+        )
         if not bool(result.get("ok")):
             detail = str(result.get("message") or "Autoconfig failed.")
             _append_degraded("autoconfig")
@@ -6580,10 +6663,15 @@ def main() -> None:
         startup_summary["servers_discovered"] = int(summary.get("servers_discovered", len(_normalize_server_configs(hub.config.get("servers", [])))))
         startup_summary["endpoints_registered"] = int(summary.get("endpoints_registered", len(_normalize_dict(hub.config.get("endpoints", {})))))
 
-        detail = (
-            f"default route resolved → {model_type} @ {endpoint}; "
-            f"models={','.join(result.get('found_models', [])) or 'none'}"
-        )
+        model_state = str(result.get("model_state") or "")
+        if model_state == "no_model":
+            detail = str(result.get("message") or "No model yet. Gateway and Web UI will still start.")
+        else:
+            detail = (
+                f"default route resolved → {model_type} @ {endpoint}; "
+                f"models={','.join(result.get('found_models', [])) or 'none'}. "
+                f"{result.get('message') or ''}"
+            ).strip()
         _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "ok", detail)
         return True
 
@@ -6611,31 +6699,73 @@ def main() -> None:
             _emit_startup_phase(6, "final status", "error", "startup halted due to autoconfig failure")
             return
 
-        # Phase 2: verify dependencies
+        def _publish_boot_health() -> None:
+            try:
+                from platform_autoconfig import assess_runtime_status, status_lines
+            except ImportError:
+                from gui_flask.platform_autoconfig import assess_runtime_status, status_lines
+            try:
+                snapshot = json.loads(Path(hub.config.path).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                snapshot = {}
+            if not isinstance(snapshot, dict):
+                snapshot = {}
+            health = assess_runtime_status(snapshot)
+            lines = status_lines(health, snapshot)
+            for line in lines:
+                _emit_startup_message(line)
+            app.after(0, lambda h=dict(health), logged=list(lines): cast(Any, app).publish_runtime_health(h, logged))
+
+        # Phase 2: verify dependencies. A missing installer does not stop the gateway.
+        startup_cfg = _normalize_dict(hub.config.get("startup", {}))
         _emit_startup_phase(2, "verify dependencies", "starting", "checking gateway dependencies")
         gw_cfg = _get_server_config_by_name("MYKRO Gateway")
         if gw_cfg is not None and bool(startup_cfg.get("autofix_gateway_deps", True)):
             deps_ok, deps_detail = _ensure_gateway_python_deps(gw_cfg)
             if not deps_ok:
                 _append_degraded("gateway_dependencies")
-                _emit_startup_phase(2, "verify dependencies", "error", deps_detail)
-                _raise_startup_issue("MYKRO Startup Issue", "Gateway dependency verification failed.", deps_detail)
-                return
-            if "installed" in deps_detail.lower():
-                startup_summary["dependency_installs_performed"] = int(startup_summary.get("dependency_installs_performed", 0)) + 1
-            _emit_startup_phase(2, "verify dependencies", "ok", deps_detail)
+                _emit_startup_phase(2, "verify dependencies", "error", deps_detail + " Continuing so the gateway and web UI can still start.")
+            else:
+                if "installed" in deps_detail.lower():
+                    startup_summary["dependency_installs_performed"] = int(startup_summary.get("dependency_installs_performed", 0)) + 1
+                _emit_startup_phase(2, "verify dependencies", "ok", deps_detail)
+        elif gw_cfg is None:
+            _emit_startup_phase(
+                2,
+                "verify dependencies",
+                "degraded",
+                f"No MYKRO Gateway entry in {hub.config.path}. Dependency auto-fix is on, but there is no gateway server to check.",
+            )
         else:
-            _emit_startup_phase(2, "verify dependencies", "ok", "gateway dependency auto-fix disabled or gateway config missing")
+            _emit_startup_phase(
+                2,
+                "verify dependencies",
+                "ok",
+                "Gateway dependency auto-fix is off because startup.autofix_gateway_deps is false.",
+            )
 
-        # Phase 3: start model servers (non-gateway)
+        # Phase 3: start model servers (non-gateway). Failure here still starts the gateway.
         model_cfg = _normalize_dict(hub.config.get("model", {}))
-        default_server_name = str(model_cfg.get("default_server") or "").strip()
         auto_server_names = _resolve_auto_start_server_names()
         model_servers = [name for name in auto_server_names if name.strip().lower() != "mykro gateway"]
         if model_servers:
             _emit_startup_phase(3, "start model servers", "starting", ", ".join(model_servers))
         else:
-            _emit_startup_phase(3, "start model servers", "skipped", "no model servers selected by policy")
+            state = str(model_cfg.get("model_state") or "")
+            upstream = str(model_cfg.get("upstream_endpoint") or "")
+            if state == "no_model":
+                skip_detail = (
+                    "No model yet, so no model server was started. "
+                    "Gateway and Web UI still start. Run MYKRO --get-model to download a small default model."
+                )
+            elif upstream:
+                skip_detail = (
+                    f"Selected model is at {upstream}. It is reused instead of started again. "
+                    "Chat goes through the MYKRO gateway."
+                )
+            else:
+                skip_detail = "No separate model server is configured. Chat uses the MYKRO gateway."
+            _emit_startup_phase(3, "start model servers", "skipped", skip_detail)
 
         for server_name in model_servers:
             ok, detail, started = _ensure_configured_server_running(server_name, startup_cfg)
@@ -6644,19 +6774,10 @@ def main() -> None:
                     startup_summary["services_started"] = int(startup_summary.get("services_started", 0)) + 1
                 _emit_startup_phase(3, "start model servers", "ok", detail, extra={"server": server_name})
                 continue
-
             _append_degraded(f"model_server:{server_name}")
-            if default_server_name and server_name.strip().lower() == default_server_name.strip().lower():
-                _emit_startup_phase(3, "start model servers", "error", detail, extra={"server": server_name})
-                _raise_startup_issue(
-                    "MYKRO Startup Issue",
-                    f"Could not start default model server '{server_name}'.",
-                    _server_error_excerpt(server_name),
-                )
-                return
             _emit_startup_phase(3, "start model servers", "degraded", detail, extra={"server": server_name})
 
-        # Phase 4: ensure gateway is running even if excluded from startup.server_names
+        # Phase 4: start the gateway on the port autoconfig chose, or reuse one that is already MYKRO.
         gateway_cfg = _normalize_dict(hub.config.get("gateway", {}))
         gw_host = str(gateway_cfg.get("host") or "127.0.0.1")
         try:
@@ -6666,79 +6787,86 @@ def main() -> None:
 
         gateway_server = _get_server_config_by_name("MYKRO Gateway")
         if gateway_server is None:
-            _emit_startup_phase(4, "start gateway", "skipped", "MYKRO Gateway is not configured")
+            _emit_startup_phase(4, "start gateway", "skipped", f"MYKRO Gateway is not in {hub.config.path}")
         elif not _is_tcp_port_open(gw_host, gw_port):
             _emit_startup_phase(4, "start gateway", "starting", f"gateway not reachable on {gw_host}:{gw_port}; attempting start")
-            ok, msg, started = _ensure_configured_server_running("MYKRO Gateway", startup_cfg)
+            ok, msg, started = _ensure_configured_server_running("MYKRO Gateway", startup_cfg, port_override=gw_port)
             if not ok:
                 _append_degraded("gateway")
                 _emit_startup_phase(4, "start gateway", "error", msg)
-                _raise_startup_issue(
-                    "MYKRO Startup Issue",
-                    "Could not start backend gateway (MYKRO Gateway).",
-                    _server_error_excerpt("MYKRO Gateway"),
-                )
-                return
             else:
                 if started:
                     startup_summary["services_started"] = int(startup_summary.get("services_started", 0)) + 1
                 _emit_startup_phase(4, "start gateway", "ok", msg)
         else:
-            _emit_startup_phase(4, "start gateway", "ok", f"gateway already listening on {gw_host}:{gw_port}")
+            try:
+                from platform_autoconfig import identify_port
+            except ImportError:
+                from gui_flask.platform_autoconfig import identify_port
+            if identify_port(gw_port) == "mykro":
+                _emit_startup_phase(4, "start gateway", "ok", f"MYKRO gateway already running on {gw_host}:{gw_port}; reusing it")
+            else:
+                _append_degraded("gateway")
+                _emit_startup_phase(
+                    4,
+                    "start gateway",
+                    "degraded",
+                    f"Port {gw_port} is open but it is not MYKRO. Autoconfig should have moved the gateway. Not starting a duplicate there.",
+                )
 
-        # Phase 5: start Web UI + household. A packaged exe cannot spawn the
-        # source scripts with a separate Python, so those launches stay in the
-        # checkout.
+        # Phase 5: Web UI and household on the ports written into the winning config.
+        # A frozen exe re-enters itself with --run-web / --run-household.
+        try:
+            from platform_autoconfig import service_command
+        except ImportError:
+            from gui_flask.platform_autoconfig import service_command
         frozen_app = bool(getattr(sys, "frozen", False))
-        auto_web = bool(startup_cfg.get("auto_start_web_ui", True)) and not frozen_app
-        web_port = 5000
+        startup_cfg = _normalize_dict(hub.config.get("startup", {}))
+        auto_web = bool(startup_cfg.get("auto_start_web_ui", True))
+        try:
+            web_port = int(float(startup_cfg.get("web_ui_port", 5000)))
+        except (TypeError, ValueError):
+            web_port = 5000
         if auto_web and not _is_tcp_port_open("127.0.0.1", web_port):
-            _emit_startup_phase(5, "start web+household", "starting", "starting Web UI on http://127.0.0.1:5000")
+            _emit_startup_phase(5, "start web+household", "starting", f"starting Web UI on http://127.0.0.1:{web_port}")
             try:
                 web_proc = _subprocess.Popen(
-                    [sys.executable, "web_ui.py"],
+                    service_command("web_ui", port=web_port, executable=sys.executable, frozen=frozen_app),
                     cwd=str(workspace),
                 )
                 web_timeout = float(startup_cfg.get("web_ui_start_timeout_secs", 60))
                 if _wait_for_port("127.0.0.1", web_port, timeout_seconds=web_timeout):
                     startup_summary["services_started"] = int(startup_summary.get("services_started", 0)) + 1
-                    _emit_startup_phase(5, "start web+household", "ok", "Web UI reachable on http://127.0.0.1:5000")
+                    _emit_startup_phase(5, "start web+household", "ok", f"Web UI reachable on http://127.0.0.1:{web_port}")
                 else:
                     web_ui_log = workspace / "web_ui.log"
                     details_parts: list[str] = [
                         f"Web UI did not open port {web_port} within {int(web_timeout)}s.",
+                        "If that port was busy, autoconfig should have chosen another and written startup.web_ui_port.",
                     ]
                     if web_proc.poll() is not None:
-                        details_parts.append(f"web_ui.py exited early with code {web_proc.returncode}.")
+                        details_parts.append(f"Web UI process exited early with code {web_proc.returncode}.")
                     if web_ui_log.exists():
                         details_parts.append("\n--- web_ui.log (tail) ---\n")
                         details_parts.append(_tail_text_file(web_ui_log, max_lines=90))
-                    details = "\n".join(details_parts)
                     _append_degraded("web_ui")
-                    _emit_startup_phase(5, "start web+household", "error", "Web UI did not become reachable on port 5000")
-                    _raise_startup_issue(
-                        "MYKRO Startup Issue",
-                        "Web UI did not become reachable on port 5000.",
-                        details,
-                    )
+                    _emit_startup_phase(5, "start web+household", "error", "\n".join(details_parts))
             except (OSError, _subprocess.SubprocessError) as exc:
                 _append_degraded("web_ui")
                 _emit_startup_phase(5, "start web+household", "error", f"Web UI launch failed: {exc}")
-                _raise_startup_issue(
-                    "MYKRO Startup Issue",
-                    "Web UI launch failed.",
-                    str(exc),
-                )
         elif auto_web:
-            _emit_startup_phase(5, "start web+household", "ok", "Web UI already listening on http://127.0.0.1:5000")
+            _emit_startup_phase(5, "start web+household", "ok", f"Web UI already listening on http://127.0.0.1:{web_port}; reusing it")
 
-        auto_household = bool(startup_cfg.get("auto_start_household", True)) and not frozen_app
-        household_port = int(float(startup_cfg.get("household_port", 5001)))
+        auto_household = bool(startup_cfg.get("auto_start_household", True))
+        try:
+            household_port = int(float(startup_cfg.get("household_port", 5001)))
+        except (TypeError, ValueError):
+            household_port = 5001
         if auto_household and not _is_tcp_port_open("127.0.0.1", household_port):
             _emit_startup_phase(5, "start web+household", "starting", f"starting Household Chat on http://127.0.0.1:{household_port}")
             try:
                 household_proc = _subprocess.Popen(
-                    [sys.executable, "household.py", "--port", str(household_port), "--host", "0.0.0.0"],
+                    service_command("household", port=household_port, executable=sys.executable, frozen=frozen_app),
                     cwd=str(workspace),
                 )
                 household_timeout = float(startup_cfg.get("household_start_timeout_secs", 45))
@@ -6780,6 +6908,7 @@ def main() -> None:
             pass
 
         app.after(0, cast(Any, app).post_update_server_status)
+        _publish_boot_health()
         _emit_startup_message("Boot sequence complete.")
 
     threading.Thread(target=_auto_establish_runtime, daemon=True).start()
