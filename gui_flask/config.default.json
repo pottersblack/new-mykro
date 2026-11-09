@@ -36,9 +36,11 @@
   },
   "setup": {
     "completed": false,
+    "tier": "",
     "use_external_backend": false,
     "requires_cloud_api_key": false,
-    "backend": ""
+    "backend": "",
+    "launch_servers": []
   },
   "ui": {
     "animation_fps": 24,

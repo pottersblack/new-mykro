@@ -43,8 +43,20 @@ jobs:
           Write-Host "Built $exe ($((Get-Item $exe).Length) bytes)"
           & $exe --version
           if ($LASTEXITCODE -ne 0) { throw "MYKRO.exe --version exited $LASTEXITCODE" }
-          & $exe --self-check
-          if ($LASTEXITCODE -ne 0) { throw "MYKRO.exe --self-check exited $LASTEXITCODE" }
+          $log = Join-Path $PWD "self-check-unconfigured.txt"
+          & $exe --self-check *> $log
+          $code = $LASTEXITCODE
+          Get-Content $log
+          $text = Get-Content $log -Raw
+          if ($text -notmatch "config_path:") { throw "self-check did not report config_path" }
+          if ($text -notmatch "MYKRO[\\/]config\.json") {
+            throw "self-check config_path is not %LOCALAPPDATA%\MYKRO\config.json"
+          }
+          if ($text -notmatch "probe:") { throw "self-check did not report a probe result" }
+          # A clean runner has no reachable model. Readiness must fail closed.
+          if ($code -eq 0) {
+            throw "Fresh runner self-check exited 0. An unwired config must fail closed."
+          }
 
       - name: Upload MYKRO.exe
         uses: actions/upload-artifact@v4

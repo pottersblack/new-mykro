@@ -134,15 +134,21 @@ def test_orchestrator_and_serverprocess():
 
 
 def test_configmanager_corrupt():
-    # ensure bad JSON results in default config and backup created
+    # Malformed JSON must fail closed and leave the user's file unchanged.
     tmpdir = tempfile.TemporaryDirectory()
     cfgfile = Path(tmpdir.name) / 'config.json'
-    cfgfile.write_text('{ invalid json')
-    cm = ConfigManager(path=cfgfile)
-    assert isinstance(cm.get('servers'), list)
-    # backup should exist
-    bak = cfgfile.with_suffix('.bad.json')
-    assert bak.exists(), 'Backup of corrupt config missing'
+    original = '{ invalid json'
+    cfgfile.write_text(original)
+    try:
+        ConfigManager(path=cfgfile)
+    except Exception as exc:
+        assert type(exc).__name__ == 'ConfigFormatError', exc
+        assert 'Malformed' in str(exc)
+        assert 'will not reset' in str(exc)
+    else:
+        raise AssertionError('malformed config was accepted or reset')
+    assert cfgfile.read_text(encoding='utf-8') == original
+    assert not cfgfile.with_suffix('.bad.json').exists()
     tmpdir.cleanup()
 
 

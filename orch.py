@@ -2,18 +2,18 @@
 
 Running this file starts the desktop orchestrator. ``--version`` and
 ``--self-check`` exit before any window opens so a packaged exe can be
-smoke-tested headlessly.
+smoke-tested headlessly. Setup and the runtime share one user config; this
+launcher does not rewrite that file.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
 
 from gui_flask.local_models import dispatch_argv
-from gui_flask.paths import config_file, ensure_data_dirs, is_frozen, resource_root
+from gui_flask.paths import ensure_data_dirs, resource_root
 
 
 def _resolve_gui_dir() -> Path:
@@ -28,51 +28,6 @@ def _resolve_gui_dir() -> Path:
 
 
 GUI_DIR = _resolve_gui_dir()
-
-
-def _ensure_orch_autostart_defaults() -> None:
-    """Make a source checkout start the full local stack.
-
-    A frozen exe keeps the startup policy saved by first-run setup. Set
-    MYKRO_DISABLE_ORCH_AUTOSTART=1 to skip this rewrite in a source checkout.
-    An external local backend (Ollama, LM Studio, llama.cpp server) is also
-    left alone.
-    """
-    if is_frozen():
-        return
-    if os.environ.get("MYKRO_DISABLE_ORCH_AUTOSTART", "").strip() == "1":
-        return
-
-    config_path = config_file()
-    if not config_path.exists():
-        return
-
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return
-
-    if not isinstance(data, dict):
-        return
-
-    setup = data.get("setup")
-    if isinstance(setup, dict) and setup.get("use_external_backend"):
-        return
-
-    startup = data.get("startup")
-    if not isinstance(startup, dict):
-        startup = {}
-
-    startup["server_mode"] = "all"
-    startup["auto_start_web_ui"] = True
-    startup["auto_start_household"] = True
-    startup.setdefault("household_port", 5001)
-    data["startup"] = startup
-
-    try:
-        config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except OSError:
-        return
 
 
 def _launch_gui() -> None:
@@ -92,5 +47,4 @@ if __name__ == "__main__":
         ensure_data_dirs()
     except Exception:
         pass
-    _ensure_orch_autostart_defaults()
     _launch_gui()
