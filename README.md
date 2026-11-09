@@ -34,7 +34,7 @@ python build_exe.py
 .\dist\MYKRO.exe
 ```
 
-`requirements-build.txt` installs PyInstaller 6.22.0. The build writes `dist\MYKRO.exe`. Python does not need to be installed on a PC that only runs that file. The exe uses the icon at `tools\mykro_icon.ico`, the version in `gui_flask\version.py`, and the bundled `gui_flask\config.default.json`. Your machine-specific `gui_flask\config.json` is not copied into the exe.
+`requirements-build.txt` installs PyInstaller 6.22.0. The build writes `dist\MYKRO.exe`. Python does not need to be installed on a PC that only runs that file. The exe uses the icon at `tools\mykro_icon.ico`, the version in `gui_flask\version.py`, and the bundled `gui_flask\config.default.json`. Your machine-specific config is not copied into the exe.
 
 ### Local models
 
@@ -52,11 +52,12 @@ Automatic startup of an installed local server (Ollama, LM Studio, Jan, llama-se
 python orch.py --version
 python orch.py --self-check
 python orch.py --setup
+.\setup.ps1
 ```
 
-The same three flags work on `.\dist\MYKRO.exe`. `--version` prints the version and exits. `--self-check` checks that the app can import, write its data directory, and probe for local models, without opening a window.
+The same flags work on `.\dist\MYKRO.exe`. `--version` prints the version and exits. `--setup` checks dependencies, then asks for tier A, B, C, or D and writes that wiring. `--self-check` prints the config path, the saved wiring, and a live probe. It exits 0 only when that endpoint is serving the configured model. It does not open a window.
 
-The exe saves its choice under `%LOCALAPPDATA%\MYKRO\config.json`. A source checkout uses `gui_flask\config.json`, which is gitignored.
+Setup and the frozen exe both read and write `%LOCALAPPDATA%\MYKRO\config.json`. That path does not depend on the working directory, `gui_flask\config.json`, or the PyInstaller unpack directory. See [docs/RUNTIME_CONFIG.md](docs/RUNTIME_CONFIG.md).
 
 ## Build script flags
 
@@ -88,4 +89,4 @@ python -m pytest
 
 ## Configuration
 
-Do not commit `gui_flask\config.json` or `.env`. Copy `gui_flask\config.default.json` to `gui_flask\config.json` if you want a starting file. Copy `gui_flask\.env.example` to `.env` only if you use the Discord bot or a local OpenClaw gateway. Neither file is required to launch.
+Do not commit `.env`. The runtime config is `%LOCALAPPDATA%\MYKRO\config.json`. MYKRO copies `gui_flask\config.default.json` there only when that user file is missing. A broken user file is left in place and reported. Copy `gui_flask\.env.example` to `.env` only if you use the Discord bot or a local OpenClaw gateway. Neither file is required to launch.

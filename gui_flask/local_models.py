@@ -322,12 +322,10 @@ def _load_config(path: Path) -> JsonObject:
     if not path.exists():
         return {}
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return {}
-    if isinstance(raw, dict):
-        return {str(key): value for key, value in raw.items()}
-    return {}
+        from gui_flask.paths import read_config_object
+    except ImportError:
+        from paths import read_config_object
+    return read_config_object(path)
 
 
 def _save_config(path: Path, data: JsonObject) -> None:
@@ -599,57 +597,13 @@ def dispatch_argv(argv: list[str]) -> int | None:
 
 
 def run_self_check() -> int:
-    """Headless launch check used by CI. It does not open a window or need a model."""
-    errors: list[str] = []
+    """Report the shared config path, wiring, and live probe. Exit 0 only on success."""
     try:
         try:
-            from gui_flask.paths import config_file, ensure_data_dirs
-            from gui_flask.version import __version__ as packaged_version
+            from gui_flask.runtime_wiring import run_self_check as _run
         except ImportError:
-            from paths import config_file, ensure_data_dirs
-            from version import __version__ as packaged_version
+            from runtime_wiring import run_self_check as _run
     except Exception as exc:  # pragma: no cover - import failure is the signal
         print(f"MYKRO self-check failed: {exc}")
         return 1
-
-    if packaged_version != __version__:
-        errors.append("version mismatch")
-
-    try:
-        ensure_data_dirs("MYKRO_SELF_CHECK")
-        probe = data_dir("MYKRO_SELF_CHECK") / "self-check.txt"
-        probe.write_text("ok\n", encoding="utf-8")
-        probe.unlink()
-    except OSError as exc:
-        errors.append(f"data dir not writable: {exc}")
-
-    try:
-        try:
-            import gui_flask.orchestrator_tk  # noqa: F401
-        except ImportError:
-            import orchestrator_tk  # noqa: F401
-    except Exception as exc:
-        errors.append(f"orchestrator import failed: {exc}")
-
-    try:
-        sample = discover_local_models(opener=lambda _url, _timeout: None, gguf_roots=[])
-    except Exception as exc:
-        errors.append(f"local model probe failed: {exc}")
-    else:
-        if not isinstance(sample.models, list):
-            errors.append("local model probe returned an unexpected result")
-
-    try:
-        path = config_file()
-        if path.name != "config.json":
-            errors.append("config path is not config.json")
-    except Exception as exc:
-        errors.append(f"config path failed: {exc}")
-
-    if errors:
-        print("MYKRO self-check failed")
-        for item in errors:
-            print(f"- {item}")
-        return 1
-    print(f"MYKRO {__version__} self-check ok")
-    return 0
+    return _run()

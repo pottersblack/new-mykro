@@ -39,6 +39,8 @@ HIDDEN_IMPORTS = (
     "gui_flask.paths",
     "gui_flask.version",
     "gui_flask.local_models",
+    "gui_flask.setup_menu",
+    "gui_flask.runtime_wiring",
     "gui_flask.orchestrator_tk",
     "gui_flask.hub",
     "gui_flask.autoconfig",

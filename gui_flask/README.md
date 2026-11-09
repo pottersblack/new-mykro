@@ -52,7 +52,7 @@ Flask web_ui.py (proxies to:)
 
 ### Model Endpoint
 
-Edit `config.json` to point to a model server:
+The desktop app and a built exe read `%LOCALAPPDATA%\MYKRO\config.json` (see `docs/RUNTIME_CONFIG.md`). An example model block:
 
 ```json
 {

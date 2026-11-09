@@ -1,0 +1,127 @@
+{
+  "model": {
+    "endpoint": "http://127.0.0.1:8090/v1/chat/completions",
+    "type": "gateway",
+    "backend": "gateway",
+    "model_name": "mykro-large",
+    "model_path": "C:\\Users\\Ethan\\AppData\\Local\\MYKRO\\models\\Qwen2.5-Coder-7B-Instruct-f16.gguf",
+    "default_server": "MYKRO Large (Qwen2.5-Coder-7B)",
+    "label": "Default — Qwen2.5-Coder-7B"
+  },
+  "servers": [
+    {
+      "name": "MYKRO Large (Qwen2.5-Coder-7B)",
+      "exe": "C:\\Tools\\llama-server.exe",
+      "args": [
+        "-m",
+        "C:\\Users\\Ethan\\AppData\\Local\\MYKRO\\models\\Qwen2.5-Coder-7B-Instruct-f16.gguf",
+        "--port",
+        "8080",
+        "--host",
+        "127.0.0.1",
+        "-c",
+        "8192",
+        "-t",
+        "20",
+        "-tb",
+        "40",
+        "-ngl",
+        "0",
+        "--device",
+        "none",
+        "--numa",
+        "distribute"
+      ],
+      "cwd": "C:\\src\\new-mykro"
+    },
+    {
+      "name": "MYKRO Small (Qwen2.5-Coder-1.5B)",
+      "exe": "C:\\Tools\\llama-server.exe",
+      "args": [
+        "-m",
+        "C:\\Users\\Ethan\\AppData\\Local\\MYKRO\\models\\Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf",
+        "--port",
+        "8081",
+        "--host",
+        "127.0.0.1",
+        "-c",
+        "4096",
+        "-t",
+        "20",
+        "-tb",
+        "40",
+        "-ngl",
+        "0",
+        "--device",
+        "none",
+        "--numa",
+        "distribute"
+      ],
+      "cwd": "C:\\src\\new-mykro"
+    },
+    {
+      "name": "MYKRO Gateway",
+      "exe": "C:\\Python312\\python.exe",
+      "args": ["gateway.py"],
+      "cwd": "C:\\src\\new-mykro\\gui_flask"
+    }
+  ],
+  "startup": {
+    "server_mode": "all",
+    "auto_start_web_ui": false,
+    "auto_start_household": false,
+    "autoconfig_on_launch": false,
+    "autofix_gateway_deps": false,
+    "rewrite_invalid_config": false,
+    "household_port": 5001
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 8090,
+    "large_model": {
+      "name": "mykro-large",
+      "endpoint": "http://127.0.0.1:8080",
+      "model_path": "C:\\Users\\Ethan\\AppData\\Local\\MYKRO\\models\\Qwen2.5-Coder-7B-Instruct-f16.gguf",
+      "max_tokens": 2048,
+      "context_size": 8192
+    },
+    "small_model": {
+      "name": "mykro-small",
+      "endpoint": "http://127.0.0.1:8081",
+      "model_path": "C:\\Users\\Ethan\\AppData\\Local\\MYKRO\\models\\Qwen2.5-Coder-1.5B-Instruct-Q8_0.gguf",
+      "max_tokens": 1024,
+      "context_size": 4096
+    }
+  },
+  "dual_model": {
+    "enabled": true,
+    "executor_endpoint": "http://127.0.0.1:8081/completion",
+    "default_executor_server": "MYKRO Small (Qwen2.5-Coder-1.5B)",
+    "executor_type": "llamacpp",
+    "router_strategy": "complexity",
+    "fallback_to_planner_on_error": true
+  },
+  "settings": {
+    "self_think": true,
+    "show_self_thought": true,
+    "three_turn": true,
+    "context_fraction": 0.6,
+    "n_predict": 1024,
+    "temperature": 0.4,
+    "top_p": 0.9,
+    "repeat_penalty": 1.1,
+    "timeout_secs": 180
+  },
+  "setup": {
+    "completed": true,
+    "tier": "B",
+    "use_external_backend": false,
+    "requires_cloud_api_key": false,
+    "backend": "gateway",
+    "launch_servers": [
+      "MYKRO Large (Qwen2.5-Coder-7B)",
+      "MYKRO Small (Qwen2.5-Coder-1.5B)",
+      "MYKRO Gateway"
+    ]
+  }
+}

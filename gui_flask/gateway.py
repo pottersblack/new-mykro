@@ -1021,9 +1021,24 @@ _DOTENV_PATH = Path(WORKSPACE_ROOT) / ".env"
 
 
 def load_config() -> dict:
+    """Read the same user config the desktop runtime uses.
+
+    A malformed file raises ``ConfigFormatError`` and is not replaced.
+    ``CONFIG_PATH`` remains the legacy package path for callers that have not
+    moved; the bytes that drive routing come from the shared runtime file.
+    """
     try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        from gui_flask.paths import ConfigFormatError, config_file, read_config_object
+    except ImportError:
+        from paths import ConfigFormatError, config_file, read_config_object
+    path = config_file()
+    try:
+        return read_config_object(path)
+    except FileNotFoundError:
+        return {}
+    except ConfigFormatError:
+        raise
+    except OSError:
         return {}
 
 

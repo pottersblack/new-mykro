@@ -194,11 +194,13 @@ try:
     from .hub import get_circuit_registry as _get_circuit_registry
     from .hub import get_hub as _get_wiring_hub
     from .autoconfig import run_autoconfig
+    from .paths import ConfigFormatError
     from . import event_schema as _event_schema
 except ImportError:
     from hub import get_circuit_registry as _get_circuit_registry
     from hub import get_hub as _get_wiring_hub
     from autoconfig import run_autoconfig
+    from paths import ConfigFormatError
     import event_schema as _event_schema
 
 
@@ -222,10 +224,6 @@ class ConfigManager:
             "servers": [],
         }
 
-    def _backup_corrupt_text(self, raw_text: str) -> None:
-        backup_path = self.path.with_suffix(".bad.json")
-        backup_path.write_text(raw_text, encoding="utf-8")
-
     def _load(self) -> JsonObject:
         default_data = self._default()
         if not self.path.exists():
@@ -246,25 +244,20 @@ class ConfigManager:
 
         try:
             loaded = json.loads(raw_text)
-        except json.JSONDecodeError:
-            try:
-                self._backup_corrupt_text(raw_text)
-            except OSError:
-                pass
-            try:
-                self._write(default_data)
-            except OSError:
-                pass
-            return default_data
-        except (TypeError, ValueError):
-            try:
-                self._write(default_data)
-            except OSError:
-                pass
-            return default_data
+        except json.JSONDecodeError as exc:
+            raise ConfigFormatError(
+                f"Malformed config at {self.path}: {exc.msg} (line {exc.lineno}, column {exc.colno}). "
+                "MYKRO will not reset this file. Fix the JSON, or move the file aside so "
+                "config.default.json can be seeded on the next launch."
+            ) from exc
 
         normalized = _normalize_dict(loaded)
-        return normalized if normalized else default_data
+        if not normalized:
+            raise ConfigFormatError(
+                f"Malformed config at {self.path}: the top-level JSON value must be an object. "
+                "MYKRO will not reset this file."
+            )
+        return normalized
 
     def _write(self, data: JsonObject) -> None:
         with self.lock:
@@ -545,7 +538,7 @@ class HTTPModelClient:
         return self.backend in {"ollama", "lmstudio", "openai", "jan", "llamacpp"}
 
     def _request_model_id(self) -> str:
-        if self._plain_local_openai() and self.model_name:
+        if self.model_name:
             return self.model_name
         return "mykro-auto"
 
@@ -6105,7 +6098,7 @@ class AppGUI(tk.Tk):
         # Model endpoint/timeout settings
         endpoint, model_type = _resolve_default_model_client_config(self.hub.config)
         timeout_secs = int(_normalize_dict(self.hub.config.get("settings", {})).get("timeout_secs", 180))
-        if endpoint:
+        if endpoint and endpoint not in {"http://localhost/dummy", "http://127.0.0.1/dummy"}:
             try:
                 self.hub.register_model_client("default", endpoint, model_type=model_type, timeout=timeout_secs)
             except Exception:
@@ -6176,11 +6169,15 @@ def main() -> None:
     try:
         from paths import config_file as _config_file
         from paths import memory_file as _memory_file
-        from local_models import dispatch_argv, run_first_time_setup
+        from local_models import dispatch_argv
+        from runtime_wiring import RuntimeNotReady, prepare_runtime
+        from setup_menu import run_setup_if_needed
     except ImportError:
         from gui_flask.paths import config_file as _config_file
         from gui_flask.paths import memory_file as _memory_file
-        from gui_flask.local_models import dispatch_argv, run_first_time_setup
+        from gui_flask.local_models import dispatch_argv
+        from gui_flask.runtime_wiring import RuntimeNotReady, prepare_runtime
+        from gui_flask.setup_menu import run_setup_if_needed
 
     cli_code = dispatch_argv(sys.argv)
     if cli_code is not None:
@@ -6191,9 +6188,28 @@ def main() -> None:
     memory_path = _memory_file()
     if os.environ.get("MYKRO_SKIP_FIRST_RUN", "").strip() != "1":
         try:
-            run_first_time_setup(config_path, force="--setup" in sys.argv)
-        except Exception:
-            logger.exception("Local model setup could not finish")
+            setup_status = run_setup_if_needed(config_path, force="--setup" in sys.argv)
+        except ConfigFormatError as exc:
+            print(f"MYKRO config error: {exc}", file=sys.stderr)
+            raise SystemExit(2) from exc
+        if setup_status in {"deferred", "failed"}:
+            print(
+                "MYKRO setup did not save a tier. Run again with --setup after the missing dependency or model file is available.",
+                file=sys.stderr,
+            )
+            raise SystemExit(4)
+
+    try:
+        prepared = prepare_runtime(config_path)
+    except ConfigFormatError as exc:
+        print(f"MYKRO config error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    except RuntimeNotReady as exc:
+        print(f"MYKRO is not ready: {exc}", file=sys.stderr)
+        raise SystemExit(3) from exc
+    except FileNotFoundError as exc:
+        print(f"MYKRO config error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
     try:
         circuit_registry = cast(CircuitRegistryLike, _get_circuit_registry())
@@ -6203,17 +6219,21 @@ def main() -> None:
         pass
 
     hub = Hub(config_path, memory_path)
-    default_endpoint, default_model_type = _resolve_default_model_client_config(hub.config)
-    _cfg_timeout = int(hub.config.get("settings", {}).get("timeout_secs", 180))
-    hub.register_model_client("default", default_endpoint, model_type=default_model_type, timeout=_cfg_timeout)
-    if default_endpoint == "http://localhost/dummy":
-        logger.debug("No configured default model endpoint found; using legacy dummy fallback")
-    else:
-        logger.debug(
-            "Registered default model client using %s endpoint: %s",
-            default_model_type,
-            default_endpoint,
-        )
+    hub.register_model_client(
+        "default",
+        prepared.wiring.endpoint,
+        model_type=prepared.wiring.model_type,
+        model_name=prepared.wiring.model_name,
+        backend=prepared.wiring.backend,
+        timeout=prepared.wiring.timeout,
+    )
+    logger.info(
+        "Registered default model client from %s using %s %s (%s)",
+        config_path,
+        prepared.wiring.backend or prepared.wiring.model_type,
+        prepared.wiring.model_name,
+        prepared.wiring.endpoint,
+    )
 
     try:
         hub.wiring.log_event(
@@ -6221,8 +6241,9 @@ def main() -> None:
             "orchestrator",
             {
                 "config_path": str(config_path),
-                "default_model_endpoint": default_endpoint,
-                "default_model_type": default_model_type,
+                "default_model_endpoint": prepared.wiring.endpoint,
+                "default_model_type": prepared.wiring.model_type,
+                "default_model_name": prepared.wiring.model_name,
             },
         )
     except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
@@ -6475,6 +6496,15 @@ def main() -> None:
         return False, f"{server_name} did not open port {port} within {int(timeout)}s.", True
 
     def _run_autoconfig_phase(startup_cfg: JsonObject) -> bool:
+        setup_cfg = _normalize_dict(hub.config.get("setup", {}))
+        if str(setup_cfg.get("tier") or "").strip():
+            _emit_startup_phase(
+                1,
+                "autoconfig endpoints/models/runtime",
+                "skipped",
+                f"tier {setup_cfg.get('tier')} already wired the runtime config",
+            )
+            return True
         if not bool(startup_cfg.get("autoconfig_on_launch", True)):
             _emit_startup_phase(1, "autoconfig endpoints/models/runtime", "skipped", "autoconfig_on_launch is disabled")
             return True
